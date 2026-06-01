@@ -44,7 +44,7 @@ caches under `/work`; the tested Llama 3.1 405B GPTQ cache occupies about 205G.
 sbatch slurm/vllm_70b_16v100.slurm
 ```
 
-For the non-Qwen 100B-class comparison:
+For the 104B-class run:
 
 ```bash
 sbatch slurm/vllm_command_r_plus_16v100.slurm

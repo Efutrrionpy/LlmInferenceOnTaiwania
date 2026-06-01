@@ -1,8 +1,8 @@
-# Non-Qwen Bigger Model Summary
+# Model Scaling Summary
 
 ## Model
 
-使用 `alpindale/c4ai-command-r-plus-GPTQ` 作為非 Qwen 的 100B-class 對比模型。
+這份筆記整理 104B 和 405B 模型的 batch throughput 結果，用來補強 72B baseline 之外的模型規模比較。
 
 | Item | Setting |
 | --- | --- |
@@ -29,13 +29,13 @@ Llama 3.1 405B GPTQ INT4 的 cache 約 `205G`。它不只成功載入，也完�
 
 ## Interpretation
 
-Command R+ 104B 比 72B baseline 慢，這符合模型較大的預期。不過 batching 仍然有效，代表這個 HPC optimization 不是只對單一 Qwen 模型有效。
+Command R+ 104B 比 72B baseline 慢，這符合模型較大的預期。不過 batching 仍然有效，代表這個 HPC optimization 不是只對單一模型規模有效。
 
 405B GPTQ INT4 更慢，但 batch scaling 更明顯：c=1 只有 `6.87 tok/s`，c=64 提升到 `103.85 tok/s`。這可以作為報告裡的「容量 + batching」示範。
 
 和 72B baseline 比較：
 
-| Setting | 72B Qwen tok/s | 104B Command R+ tok/s | Ratio |
+| Setting | 72B model tok/s | 104B model tok/s | Ratio |
 | --- | ---: | ---: | ---: |
 | c=1 | 41.92 | 21.90 | 52.3% |
 | c=16 | 322.95 | 201.72 | 62.5% |

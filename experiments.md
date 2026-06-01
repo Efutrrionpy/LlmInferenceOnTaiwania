@@ -32,7 +32,7 @@ Target system:
 | 930712 | hardware 1-node TP8/PP1 mp backend | 8 | 1 | 1 | 4 | auto | XFormers | COMPLETED | aggregate 47.47 tok/s, decode 52.07 tok/s, latency 2.69 s |
 | 930727 | hardware 1-node TP8/PP1 mp + NCCL LL128 | 8 | 1 | 1 | 4 | auto | XFormers | COMPLETED | aggregate 42.81 tok/s, decode 46.52 tok/s, latency 2.99 s |
 | 930741 | hardware 1-node TP8/PP1 mp + NCCL Tree | 8 | 1 | 1 | 4 | auto | XFormers | COMPLETED | aggregate 47.12 tok/s, decode 51.68 tok/s, latency 2.71 s |
-| 933544 | non-Qwen Command R+ 104B GPTQ smoke | 8 | 2 | 1 | 4 | auto | XFormers | COMPLETED | output=64, aggregate 21.16 tok/s, decode 23.15 tok/s, latency 3.02 s |
+| 933544 | Command R+ 104B GPTQ smoke | 8 | 2 | 1 | 4 | auto | XFormers | COMPLETED | output=64, aggregate 21.16 tok/s, decode 23.15 tok/s, latency 3.02 s |
 | 933548 | Command R+ 104B GPTQ c=1 o128 | 8 | 2 | 1 | 4 | auto | XFormers | COMPLETED | aggregate 21.90 tok/s, decode 23.08 tok/s, latency 5.84 s |
 | 933549 | Command R+ 104B GPTQ batch c=16 | 8 | 2 | 16 | 32 | 8192 | XFormers | COMPLETED | aggregate 201.72 tok/s, latency 10.14 s, 9.21x over Command R+ c=1 |
 | 933557 | Llama 3.1 405B GPTQ INT4 smoke | 8 | 2 | 1 | 1 | auto | XFormers | COMPLETED | cache 205G, output=16, aggregate 4.90 tok/s, decode 7.54 tok/s, latency 3.25 s, elapsed 19:58 |
@@ -135,7 +135,7 @@ Notes:
 
 - Job `930083` wrote `$PROJECT_DIR/runs/930083/summary.json`.
 - Job `930187` wrote `$PROJECT_DIR/runs/930187/summary.json`.
-- Jobs `933544`, `933548`, and `933549` successfully ran `alpindale/c4ai-command-r-plus-GPTQ` as a non-Qwen 104B GPTQ candidate. The cache occupies about 55G under `/work/$USER/hf-cache-command-r-plus-gptq`.
+- Jobs `933544`, `933548`, and `933549` successfully ran `alpindale/c4ai-command-r-plus-GPTQ` as a 104B GPTQ candidate. The cache occupies about 55G under `/work/$USER/hf-cache-command-r-plus-gptq`.
 - Jobs `933557`, `933580`-`933582`, `933591`-`933593`, and `933601` successfully ran `hugging-quants/Meta-Llama-3.1-405B-Instruct-GPTQ-INT4`; the cache occupies about 205G under `/work/$USER/hf-cache-llama31-405b-gptq`.
 - vLLM logs for `930187` showed `Cannot use FlashAttention-2 backend for Volta and Turing GPUs` followed by `Using XFormers backend`.
 - The large-model cache should stay under `/work`; `quota -s` showed no user quota, and the 405B GPTQ cache reached 205G successfully.
@@ -151,7 +151,7 @@ These are optional follow-ups if more allocation time is available:
 | `NCCL_NET_GDR_LEVEL=0` | Disable GPU Direct RDMA as a smaller inter-node hardware-control experiment | `TP_SIZE=8 PP_SIZE=2 NCCL_NET_GDR_LEVEL=0 NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT,NET` |
 | Longer output length | Test a more decode-heavy regime | `OUTPUT_TOKENS=256` or `512` |
 | Higher batch pressure | Optional stress point beyond the observed c=64 region | `TP_SIZE=8 PP_SIZE=2 MAX_NUM_SEQS=96 MAX_NUM_BATCHED_TOKENS=24576 CONCURRENCY=96`, only if latency blow-up is acceptable |
-| Non-Qwen larger model | Extend the 100B-class Command R+ batch curve | `sbatch --export=ALL,EXPERIMENT_NAME=command-r-plus-batch-c32,CONCURRENCY=32,MAX_NUM_SEQS=32,MAX_NUM_BATCHED_TOKENS=8192,RUNS=128 slurm/vllm_command_r_plus_16v100.slurm` |
+| 104B larger batch point | Extend the Command R+ batch curve | `sbatch --export=ALL,EXPERIMENT_NAME=command-r-plus-batch-c32,CONCURRENCY=32,MAX_NUM_SEQS=32,MAX_NUM_BATCHED_TOKENS=8192,RUNS=128 slurm/vllm_command_r_plus_16v100.slurm` |
 | 405B longer decode | Test whether 405B throughput changes in a more decode-heavy regime | `OUTPUT_TOKENS=128 CONCURRENCY=16 RUNS=64 MAX_NUM_SEQS=16` |
 
 Metrics to compare:

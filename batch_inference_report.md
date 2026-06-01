@@ -2,11 +2,11 @@
 
 ## 摘要
 
-本實驗在 Taiwania 2 的 V100 GPU 節點上測試 LLM inference throughput。主要模型是 `Qwen/Qwen2.5-72B-Instruct-GPTQ-Int4`，推論框架是 vLLM `0.7.0`。實驗重點是 batch inference：在固定 2 nodes、16 x V100 的資源下，提高 concurrent requests，觀察 aggregate output token throughput 的變化。
+本實驗在 Taiwania 2 的 V100 GPU 節點上測試 LLM inference throughput。推論框架是 vLLM `0.7.0`，模型涵蓋 72B、104B、405B 三個規模。實驗重點是 batch inference：在固定 2 nodes、16 x V100 的資源下，提高 concurrent requests，觀察 aggregate output token throughput 的變化。
 
 最主要的結果是：在 70B 模型上，concurrency 從 1 提高到 64，aggregate throughput 從 `41.92 tok/s` 提升到 `481.82 tok/s`，達到 `11.49x`。代價是 mean latency 從 `3.05 s` 增加到 `16.98 s`。
 
-另外補了一個非 Qwen 的 100B-class 對比：`alpindale/c4ai-command-r-plus-GPTQ`。這個 104B GPTQ 模型在 c=16 時達到 `201.72 tok/s`，相對 c=1 的 `21.90 tok/s` 是 `9.21x`。這表示更大的 dense model 雖然單流較慢，但仍然能明顯受益於 continuous batching。
+104B 模型使用 `alpindale/c4ai-command-r-plus-GPTQ`。這個 104B GPTQ 模型在 c=16 時達到 `201.72 tok/s`，相對 c=1 的 `21.90 tok/s` 是 `9.21x`。這表示更大的 dense model 雖然單流較慢，但仍然能明顯受益於 continuous batching。
 
 最後也做了一個更大的 405B GPTQ INT4 對比：`hugging-quants/Meta-Llama-3.1-405B-Instruct-GPTQ-INT4`。這個 checkpoint cache 約 `205G`，可以在 16 x V100 上成功載入。batch concurrency 從 1 提高到 64 時，aggregate throughput 從 `6.87 tok/s` 提升到 `103.85 tok/s`，達到 `15.12x`。
 
@@ -19,9 +19,9 @@
 | Main allocation | 2 nodes, 16 GPUs, 1 hour |
 | Framework | vLLM `0.7.0` |
 | Quantization | GPTQ |
-| Main model | `Qwen/Qwen2.5-72B-Instruct-GPTQ-Int4` |
-| Comparison model | `alpindale/c4ai-command-r-plus-GPTQ` |
-| Large batch model | `hugging-quants/Meta-Llama-3.1-405B-Instruct-GPTQ-INT4` |
+| 72B model | `Qwen/Qwen2.5-72B-Instruct-GPTQ-Int4` |
+| 104B model | `alpindale/c4ai-command-r-plus-GPTQ` |
+| 405B model | `hugging-quants/Meta-Llama-3.1-405B-Instruct-GPTQ-INT4` |
 | Parallelism | `TP_SIZE=8`, `PP_SIZE=2` |
 | Input / output | about 500 input tokens, 128 output tokens |
 
@@ -55,9 +55,9 @@ Batching 大幅提升總吞吐量，但會增加等待時間。c=64 是最高 th
 
 同樣 c=32 時，1-node 只用一半 GPU，但達到 2-node throughput 的 `73.7%`。這代表多一個 node 可以提高總吞吐量，但跨節點和平行化成本會讓 scaling 不完全線性。
 
-## 104B Model Comparison
+## 104B Batch Scaling
 
-為了加入非 Qwen 的大模型對比，測試了 `alpindale/c4ai-command-r-plus-GPTQ`。這是 104B dense GPTQ 模型，cache 約 `55G`。
+104B 測試使用 `alpindale/c4ai-command-r-plus-GPTQ`。這是 104B dense GPTQ 模型，cache 約 `55G`。
 
 | Job ID | Model | Concurrency | Requests | Aggregate tok/s | Speedup | Mean latency s | Mean TTFT s | Decode tok/s |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -86,7 +86,7 @@ Command R+ 104B 比 72B baseline 慢，但 batch scaling 仍然明顯。c=16 時
 
 本實驗最主要的優化是 continuous batching。對 70B GPTQ 模型，batch concurrency 從 1 增加到 64，使 aggregate throughput 從 `41.92 tok/s` 提升到 `481.82 tok/s`，達到 `11.49x`。
 
-HPC 角度下，重點不是單一 request 最快，而是在固定 GPU allocation 內處理最多 token。2-node 設定提供最高總吞吐量；1-node 設定提供較好的 per-GPU efficiency。對更大的 104B 和 405B 模型，batching 仍然帶來明顯 throughput gain，證明這個方法不只適用於單一 Qwen 模型。
+HPC 角度下，重點不是單一 request 最快，而是在固定 GPU allocation 內處理最多 token。2-node 設定提供最高總吞吐量；1-node 設定提供較好的 per-GPU efficiency。對 72B、104B、405B 三個規模，batching 都帶來明顯 throughput gain，證明這個方法不是只對單一模型有效。
 
 405B GPTQ INT4 也補上容量面結論：在 `/work` cache 約 `205G` 的情況下，16 x V100 可以完成載入、短輸出和 batch throughput 測試。
 
@@ -95,5 +95,5 @@ HPC 角度下，重點不是單一 request 最快，而是在固定 GPU allocati
 1. Concurrency vs aggregate output tok/s
 2. Concurrency vs mean latency
 3. 1-node vs 2-node tok/s/GPU
-4. 70B vs 104B batch throughput comparison
+4. Model size vs batch throughput comparison
 5. 405B concurrency vs aggregate output tok/s
