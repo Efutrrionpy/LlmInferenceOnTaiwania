@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-# Non-Qwen 100B-class dense-model runner. This public GPTQ checkpoint is about
+# 100B-class dense-model runner. This public GPTQ checkpoint is about
 # 58.7GB and has been smoke-tested on Taiwania 2 with vLLM 0.7.0.
 export MODEL_ID="${MODEL_ID:-alpindale/c4ai-command-r-plus-GPTQ}"
 export SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-command-r-plus-gptq}"
