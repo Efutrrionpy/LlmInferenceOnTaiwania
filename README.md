@@ -1,17 +1,17 @@
 # LLM Inference Batch Optimization on Taiwania 2
 
-這個 repository 記錄在 Taiwania 2 V100 GPU 節點上做 LLM inference throughput optimization 的實驗。核心問題是：在一次最長一小時、最多 2 nodes / 16 x V100 的 HPC allocation 內，怎麼提高大型語言模型的總輸出 token throughput。
+This repository documents LLM inference throughput experiments on Taiwania 2 V100 GPU nodes. The main question is: under a one-hour HPC allocation with up to 2 nodes and 16 V100 GPUs, how can we increase aggregate output-token throughput for large language model inference?
 
-本實驗使用 vLLM `0.7.0`。因為 V100 是 Volta 架構，compute capability 是 `7.0`，新版 vLLM 對 GPU 架構支援較不適合，因此固定使用仍支援 V100 的版本。
+The experiments use vLLM `0.7.0`. V100 is a Volta GPU with compute capability `7.0`, while newer vLLM releases are less suitable for this hardware generation. Therefore, this project pins a vLLM version that still works on V100.
 
 ## TL;DR
 
-- 主要有效的優化是 continuous batching，也就是同時讓多個 request 進入 vLLM scheduler。
-- 72B GPTQ 模型在 16 x V100 上，concurrency 從 `1` 提高到 `64`，aggregate throughput 從 `41.92 tok/s` 提升到 `481.82 tok/s`，為 `11.49x`。
-- 104B GPTQ 模型在 concurrency `16` 時達到 `201.72 tok/s`，相對 c=1 是 `9.21x`。
-- 405B GPTQ INT4 模型 cache 約 `205G`，可以在 16 x V100 上成功載入；concurrency `64` 時達到 `103.85 tok/s`，相對 c=1 是 `15.12x`。
-- 2 nodes 有最高總吞吐量，但 1 node 有更好的 per-GPU efficiency。這表示多用 GPU 不一定線性變快，跨節點與 pipeline parallelism 會帶來額外成本。
-- FlashAttention-2 不是這組 V100/vLLM stack 的可行優化路徑，實際 backend 會 fallback 到 XFormers。
+- The most effective optimization is continuous batching, where multiple requests are admitted into the vLLM scheduler at the same time.
+- For the 72B GPTQ model on 16 x V100, increasing concurrency from `1` to `64` improves aggregate throughput from `41.92 tok/s` to `481.82 tok/s`, a `11.49x` speedup.
+- For the 104B GPTQ model, concurrency `16` reaches `201.72 tok/s`, which is `9.21x` faster than c=1.
+- For the 405B GPTQ INT4 model, the model cache is about `205G` and can be loaded successfully on 16 x V100. At concurrency `64`, it reaches `103.85 tok/s`, a `15.12x` speedup over c=1.
+- 2 nodes provide the highest total throughput, but 1 node has better per-GPU efficiency. More GPUs do not scale linearly because cross-node execution and pipeline parallelism introduce overhead.
+- FlashAttention-2 is not a practical optimization path for this V100/vLLM stack. The runtime falls back to XFormers.
 
 ## Experiment Setup
 
@@ -35,36 +35,36 @@ Tested models:
 
 Metric meanings:
 
-- `Concurrency`: 同時進入系統的 in-flight requests 數量。
-- `Requests`: 該次 benchmark 實際測量的總 request 數量。
-- `Aggregate tok/s`: 整個服務在測試期間每秒輸出的總 token 數，是本實驗最重要的 throughput 指標。
-- `Decode tok/s`: 單一 request 在拿到第一個 token 之後的 decoding 速度。batch 變大時，aggregate tok/s 會上升，但每個 request 的 decode tok/s 通常會下降。
+- `Concurrency`: the number of in-flight requests served at the same time.
+- `Requests`: the total number of measured benchmark requests.
+- `Aggregate tok/s`: total output tokens generated per second by the whole system. This is the main throughput metric in this project.
+- `Decode tok/s`: per-request decoding speed after the first token is produced. As batch size increases, aggregate tok/s usually increases, while per-request decode tok/s usually decreases.
 
 ## Reproduce
 
-提交前先把 Slurm 檔案裡的 `YOUR_ACCOUNT` 換成自己的 project allocation account。若使用 gated model，例如 Llama，提交前也要先設定 `HF_TOKEN`。
+Before submitting jobs, replace `YOUR_ACCOUNT` in the Slurm files with the project allocation account. For gated models such as Llama, set `HF_TOKEN` before submission.
 
-先在 compute node 上建立環境，不要在 login node 做安裝或推論：
+Create the vLLM environment on a compute node. Do not install packages or run inference on the login node:
 
 ```bash
 cd /work/$USER/llm
 sbatch slurm/setup_vllm_env.slurm
 ```
 
-提交 72B baseline：
+Submit the 72B baseline:
 
 ```bash
 sbatch slurm/vllm_70b_16v100.slurm
 ```
 
-提交 104B 和 405B：
+Submit the 104B and 405B runs:
 
 ```bash
 sbatch slurm/vllm_command_r_plus_16v100.slurm
 sbatch slurm/vllm_llama31_405b_gptq_16v100.slurm
 ```
 
-Batch throughput example：
+Batch throughput example:
 
 ```bash
 EXPERIMENT_NAME=batch-c64 \
@@ -77,17 +77,17 @@ RUNS=256 \
 sbatch slurm/vllm_70b_16v100.slurm
 ```
 
-每個 job 會輸出到：
+Each job writes outputs to:
 
 ```text
 runs/<slurm-job-id>/
 ```
 
-其中 `summary.json` 是主要統計結果，`experiment.env` 記錄 Slurm、模型、parallelism 和 benchmark 參數，`vllm-server.log` 可確認 backend、NCCL 和模型載入狀態。
+The most important files are `summary.json`, `experiment.env`, and `vllm-server.log`. `summary.json` contains the benchmark statistics, `experiment.env` records Slurm/model/parallelism settings, and `vllm-server.log` can be used to check the backend, NCCL behavior, and model loading status.
 
 ## 72B Batch Throughput
 
-2-node batch scaling 使用 16 x V100，`TP_SIZE=8`、`PP_SIZE=2`。
+The 2-node batch scaling runs use 16 x V100 with `TP_SIZE=8` and `PP_SIZE=2`.
 
 | Job ID | Concurrency | Requests | Aggregate tok/s | Speedup | Mean latency s | Mean TTFT s | Decode tok/s |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -100,11 +100,11 @@ runs/<slurm-job-id>/
 | 930859 | 48 | 192 | 453.71 | 10.82x | 13.521 | 3.197 | 12.43 |
 | 930884 | 64 | 256 | 481.82 | 11.49x | 16.979 | 4.181 | 10.04 |
 
-結果顯示 batching 可以明顯提升系統總吞吐量，但代價是 latency 上升。c=64 是最高 throughput；c=48 比較像 throughput 和 latency 的折衷點。從 c=48 到 c=64，throughput 只增加約 `6.2%`，但 mean latency 增加約 `25.6%`。
+Batching greatly improves total system throughput, but the tradeoff is higher latency. c=64 gives the highest throughput among the tested settings. c=48 is a more balanced point between throughput and latency: from c=48 to c=64, throughput improves by only about `6.2%`, while mean latency increases by about `25.6%`.
 
 ## 1-Node vs 2-Node
 
-同樣做 batch inference 時，2 nodes 有最高總 throughput，但 1 node 的 per-GPU efficiency 較好。
+For batch inference, 2 nodes provide the highest total throughput, while 1 node provides better per-GPU efficiency.
 
 | Job ID | Nodes | GPUs | Concurrency | Aggregate tok/s | Tok/s/GPU | Mean latency s |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -113,11 +113,11 @@ runs/<slurm-job-id>/
 | 930884 | 2 | 16 | 64 | 481.82 | 30.11 | 16.979 |
 | 930937 | 1 | 8 | 64 | 334.06 | 41.76 | 24.498 |
 
-同樣 c=32 時，1 node 只用一半 GPU，但達到 2-node throughput 的 `73.7%`。這說明跨節點 parallelism 可以提高總吞吐量，但 scaling 不會完全線性。
+At c=32, the 1-node run uses only half the GPUs but still reaches `73.7%` of the 2-node throughput. This shows that cross-node parallelism can improve total throughput, but the scaling is not linear.
 
 ## Larger Models
 
-104B 和 405B 測試用來確認 batch throughput 是否只對某個模型有效。結果顯示模型變大後單流速度變慢，但 continuous batching 仍然帶來明顯提升。
+The 104B and 405B runs test whether batch throughput gains also hold for larger models. The results show that larger models have slower single-stream throughput, but continuous batching still provides large aggregate throughput gains.
 
 | Model | Cache | Concurrency | Requests | Output tokens | Aggregate tok/s | Speedup | Mean latency s |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -131,25 +131,25 @@ runs/<slurm-job-id>/
 | Llama 3.1 405B GPTQ INT4 | 205G | 32 | 128 | 32 | 77.90 | 11.34x | 13.114 |
 | Llama 3.1 405B GPTQ INT4 | 205G | 64 | 256 | 32 | 103.85 | 15.12x | 19.678 |
 
-405B 的結果也回答了容量問題：理論上 16 x V100 有 512GB GPU memory，而 GPTQ INT4 checkpoint 約 205G cache，在這個 setup 下可以成功載入並完成 batch benchmark。
+The 405B result also answers the capacity question. Although 16 x V100 provides 512GB of theoretical GPU memory, a 405B model is only practical here because the weights are quantized. With the GPTQ INT4 checkpoint, the cache occupies about `205G`, and the model can be loaded and benchmarked successfully on this setup.
 
 ## Hardware Notes
 
-除了 batch，本實驗也做過幾個偏硬體與 topology 的控制實驗：
+Several hardware- and topology-oriented control experiments were also tested:
 
 | Setting | Aggregate tok/s | Mean latency s | Observation |
 | --- | ---: | ---: | --- |
-| 1 node, `TP=8`, `PP=1`, multiprocessing | 47.47 | 2.694 | 最好的 single-request 設定，避免跨節點 pipeline overhead |
-| 2 nodes, `TP=8`, `PP=2` | 42.60 | 3.002 | 預設 16-GPU layout，總資源較多但單流較慢 |
-| 2 nodes, `TP=4`, `PP=4` | 37.17 | 3.440 | 更多 pipeline stages 對 single request 不利 |
-| 2 nodes, `NCCL_P2P_DISABLE=1` | 29.25 | 4.374 | 關閉 intra-node GPU P2P 後明顯變慢 |
-| 1 node, forced `NCCL_PROTO=LL128` | 42.81 | 2.988 | 比 NCCL auto 慢 |
-| 1 node, forced `NCCL_ALGO=Tree` | 47.12 | 2.714 | 接近 auto，但仍略慢 |
+| 1 node, `TP=8`, `PP=1`, multiprocessing | 47.47 | 2.694 | Best single-request setting; avoids cross-node pipeline overhead |
+| 2 nodes, `TP=8`, `PP=2` | 42.60 | 3.002 | Default 16-GPU layout; more resources but slower for a single request |
+| 2 nodes, `TP=4`, `PP=4` | 37.17 | 3.440 | More pipeline stages hurt single-request inference |
+| 2 nodes, `NCCL_P2P_DISABLE=1` | 29.25 | 4.374 | Disabling intra-node GPU P2P causes a large slowdown |
+| 1 node, forced `NCCL_PROTO=LL128` | 42.81 | 2.988 | Slower than NCCL auto-selection |
+| 1 node, forced `NCCL_ALGO=Tree` | 47.12 | 2.714 | Close to auto-selection, but still slightly slower |
 
-這些結果說明：對 single-request inference 而言，更多 GPU 不一定更快。比較好的 HPC 故事是把 continuous batching 和 topology-aware parallelism 放在一起看：batching 提高系統吞吐量，topology 解釋為什麼新增節點後效率不會線性提升。
+These results show that more GPUs are not automatically faster for single-request inference. A better HPC interpretation combines continuous batching with topology-aware parallelism: batching increases total throughput, while topology explains why adding another node does not scale linearly.
 
 ## Conclusion
 
-本實驗最重要的優化是 continuous batching。在固定 16 x V100 的條件下，72B GPTQ 模型從 c=1 到 c=64 得到 `11.49x` aggregate throughput gain。104B 和 405B 模型也有同樣趨勢，代表這不是單一模型的特殊現象。
+The main optimization in this project is continuous batching. Under a fixed 16 x V100 allocation, the 72B GPTQ model improves from c=1 to c=64 by `11.49x` in aggregate output-token throughput. The 104B and 405B models show the same trend, so the result is not limited to one model.
 
-從 HPC 角度看，最佳化目標不是讓單一 request 最快，而是在固定 allocation 內處理最多 output tokens。若目標是最高總 throughput，2 nodes 較好；若目標是 GPU 使用效率，1 node 反而更有優勢。V100 上 FlashAttention-2 不可用，因此本實驗中真正有效且可展示的方向是 vLLM continuous batching、parallelism topology 和 NCCL/P2P 控制實驗。
+From an HPC perspective, the goal is not to make a single request as fast as possible, but to process as many output tokens as possible within a fixed allocation. If the goal is maximum total throughput, 2 nodes are better. If the goal is GPU efficiency, 1 node can be better. On V100, FlashAttention-2 is not available, so the meaningful optimization story is vLLM continuous batching, parallelism topology, and NCCL/P2P control experiments.
