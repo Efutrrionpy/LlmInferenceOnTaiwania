@@ -77,10 +77,10 @@ RUNS=256 \
 sbatch slurm/vllm_70b_16v100.slurm
 ```
 
-Each job writes outputs to:
+Each run writes outputs to:
 
 ```text
-runs/<slurm-job-id>/
+runs/<run-id>/
 ```
 
 The most important files are `summary.json`, `experiment.env`, and `vllm-server.log`. `summary.json` contains the benchmark statistics, `experiment.env` records Slurm/model/parallelism settings, and `vllm-server.log` can be used to check the backend, NCCL behavior, and model loading status.
@@ -89,16 +89,16 @@ The most important files are `summary.json`, `experiment.env`, and `vllm-server.
 
 The 2-node batch scaling runs use 16 x V100 with `TP_SIZE=8` and `PP_SIZE=2`.
 
-| Job ID | Concurrency | Requests | Aggregate tok/s | Speedup | Mean latency s | Mean TTFT s | Decode tok/s |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 930301 | 1 | 8 | 41.92 | 1.00x | 3.050 | 0.259 | 45.56 |
-| 930314 | 4 | 16 | 121.50 | 2.90x | 4.205 | 0.480 | 34.14 |
-| 930321 | 8 | 32 | 219.81 | 5.24x | 4.651 | 0.648 | 31.81 |
-| 930349 | 16 | 64 | 322.95 | 7.70x | 6.334 | 1.210 | 24.91 |
-| 930811 | 24 | 96 | 350.08 | 8.35x | 8.761 | 1.668 | 18.00 |
-| 930833 | 32 | 128 | 406.27 | 9.69x | 10.068 | 2.150 | 16.14 |
-| 930859 | 48 | 192 | 453.71 | 10.82x | 13.521 | 3.197 | 12.43 |
-| 930884 | 64 | 256 | 481.82 | 11.49x | 16.979 | 4.181 | 10.04 |
+| Concurrency | Requests | Aggregate tok/s | Speedup | Mean latency s | Mean TTFT s | Decode tok/s |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 8 | 41.92 | 1.00x | 3.050 | 0.259 | 45.56 |
+| 4 | 16 | 121.50 | 2.90x | 4.205 | 0.480 | 34.14 |
+| 8 | 32 | 219.81 | 5.24x | 4.651 | 0.648 | 31.81 |
+| 16 | 64 | 322.95 | 7.70x | 6.334 | 1.210 | 24.91 |
+| 24 | 96 | 350.08 | 8.35x | 8.761 | 1.668 | 18.00 |
+| 32 | 128 | 406.27 | 9.69x | 10.068 | 2.150 | 16.14 |
+| 48 | 192 | 453.71 | 10.82x | 13.521 | 3.197 | 12.43 |
+| 64 | 256 | 481.82 | 11.49x | 16.979 | 4.181 | 10.04 |
 
 Batching greatly improves total system throughput, but the tradeoff is higher latency. c=64 gives the highest throughput among the tested settings. c=48 is a more balanced point between throughput and latency: from c=48 to c=64, throughput improves by only about `6.2%`, while mean latency increases by about `25.6%`.
 
@@ -106,12 +106,12 @@ Batching greatly improves total system throughput, but the tradeoff is higher la
 
 For batch inference, 2 nodes provide the highest total throughput, while 1 node provides better per-GPU efficiency.
 
-| Job ID | Nodes | GPUs | Concurrency | Aggregate tok/s | Tok/s/GPU | Mean latency s |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 930833 | 2 | 16 | 32 | 406.27 | 25.39 | 10.068 |
-| 930912 | 1 | 8 | 32 | 299.35 | 37.42 | 13.666 |
-| 930884 | 2 | 16 | 64 | 481.82 | 30.11 | 16.979 |
-| 930937 | 1 | 8 | 64 | 334.06 | 41.76 | 24.498 |
+| Nodes | GPUs | Concurrency | Aggregate tok/s | Tok/s/GPU | Mean latency s |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 | 16 | 32 | 406.27 | 25.39 | 10.068 |
+| 1 | 8 | 32 | 299.35 | 37.42 | 13.666 |
+| 2 | 16 | 64 | 481.82 | 30.11 | 16.979 |
+| 1 | 8 | 64 | 334.06 | 41.76 | 24.498 |
 
 At c=32, the 1-node run uses only half the GPUs but still reaches `73.7%` of the 2-node throughput. This shows that cross-node parallelism can improve total throughput, but the scaling is not linear.
 

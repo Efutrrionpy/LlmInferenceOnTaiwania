@@ -21,7 +21,6 @@ cd "${PROJECT_DIR}"
 echo "Project dir: ${PROJECT_DIR}"
 echo "Run dir: ${RUN_DIR}"
 echo "Node: $(hostname)"
-echo "Job ID: ${SLURM_JOB_ID:-manual}"
 
 bash scripts/setup_vllm_v100_env.sh 2>&1 | tee "${RUN_DIR}/setup.log"
 
