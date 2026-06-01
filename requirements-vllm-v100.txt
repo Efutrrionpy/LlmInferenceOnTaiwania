@@ -1,0 +1,6 @@
+vllm==0.7.0
+ray>=2.9,<3
+transformers>=4.48,<4.50
+huggingface-hub>=0.27
+sentencepiece>=0.2
+protobuf>=4.25

@@ -1,0 +1,22 @@
+# Runtime outputs
+runs/
+slurm-*.out
+slurm-*.err
+*.log
+
+# Python / virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+.venv-*/
+
+# Local caches and secrets
+.cache/
+.env
+hf-cache*/
+llm-hf-cache/
+
+# Editor / OS noise
+.DS_Store
+.vscode/
+.idea/
