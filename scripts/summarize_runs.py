@@ -25,6 +25,8 @@ def detect_backend(log_path: Path) -> str:
     for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
         if "Using XFormers backend" in line:
             backend = "XFormers"
+        elif "FLASH_ATTN_V100" in line:
+            backend = "FlashAttention V100"
         elif "Using FlashAttention" in line:
             backend = "FlashAttention"
         elif "Cannot use FlashAttention" in line and backend == "unknown":

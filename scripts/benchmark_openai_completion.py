@@ -72,6 +72,7 @@ def stream_completion(
         "model": model,
         "prompt": prompt,
         "max_tokens": output_tokens,
+        "min_tokens": output_tokens,
         "temperature": 0,
         "stream": True,
         "ignore_eos": True,
@@ -86,6 +87,7 @@ def stream_completion(
     started = time.perf_counter()
     first_token_at = None  # type: Optional[float]
     chunks = []  # type: List[str]
+    stream_events = 0
 
     try:
         with urllib.request.urlopen(request, timeout=timeout_s) as response:
@@ -102,6 +104,7 @@ def stream_completion(
                     break
 
                 event = json.loads(raw.decode("utf-8"))
+                stream_events += 1
                 text = event.get("choices", [{}])[0].get("text", "")
                 if text and first_token_at is None:
                     first_token_at = time.perf_counter()
@@ -118,6 +121,7 @@ def stream_completion(
         "text": "".join(chunks),
         "latency_s": finished - started,
         "ttft_s": first_token_at - started,
+        "stream_events": stream_events,
     }
 
 
@@ -133,7 +137,8 @@ def run_one(
     index: int,
 ) -> Dict[str, Any]:
     result = stream_completion(base_url, model, prompt, output_tokens, timeout_s)
-    output_token_count = len(tokenizer.encode(result["text"], add_special_tokens=False))
+    output_text_tokens = len(tokenizer.encode(result["text"], add_special_tokens=False))
+    output_token_count = max(output_text_tokens, int(result.get("stream_events", 0)))
     latency_s = result["latency_s"]
     ttft_s = result["ttft_s"]
     decode_s = max(0.0, latency_s - ttft_s)
@@ -143,6 +148,8 @@ def run_one(
         "index": index,
         "input_tokens": input_tokens,
         "output_tokens": output_token_count,
+        "output_text_tokens": output_text_tokens,
+        "stream_events": result.get("stream_events", 0),
         "latency_s": latency_s,
         "ttft_s": ttft_s,
         "decode_s": decode_s,
