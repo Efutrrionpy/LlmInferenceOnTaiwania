@@ -1,8 +1,8 @@
-# 405B LLM Inference Baseline on Taiwania 2
+# LLM Inference Throughput on Taiwania 2
 
-This repository documents a focused LLM inference baseline on Taiwania 2 using a one-hour HPC allocation with 2 V100 nodes. The experiment asks how much aggregate output-token throughput can be improved for a 405B-class model by using vLLM continuous batching, then checks a V100-specific FlashAttention fork as a hardware-oriented extension.
+This repository documents focused LLM inference experiments on Taiwania 2 using one-hour HPC allocations on NVIDIA V100 nodes. The main experiment asks how much aggregate output-token throughput can be improved for a 405B-class GPTQ model by using vLLM continuous batching, then checks a V100-specific FlashAttention fork as a hardware-oriented extension.
 
-The main model is `hugging-quants/Meta-Llama-3.1-405B-Instruct-GPTQ-INT4`. It is a quantized GPTQ INT4 checkpoint, so it can be loaded on 16 x V100-SXM2-32GB even though a dense 405B model would not fit in this allocation.
+The repository also includes a successful Qwen MoE contrast using `Qwen/Qwen3-235B-A22B-GPTQ-Int4` on 1 node / 8 x V100. This is not an apples-to-apples model comparison: the Qwen model is much faster because it is a sparse MoE model with fewer active parameters per generated token.
 
 ## TL;DR
 
@@ -12,9 +12,10 @@ The main model is `hugging-quants/Meta-Llama-3.1-405B-Instruct-GPTQ-INT4`. It is
 - The tradeoff is latency: mean latency rises from `17.60s` at c=1 to `51.22s` at c=32.
 - On the stock V100/vLLM stack, the attention backend is XFormers, not FlashAttention.
 - A V100-specific vLLM fork with `FLASH_ATTN_V100` raises the c=32 result to `83.73 tok/s`, but it is not uniformly faster at every concurrency level.
-- A 1-node attempt cannot support this workload shape because the available KV cache only supports `480` tokens while the required `max_model_len` is `1024`.
+- The Qwen MoE GPTQ INT4 contrast runs on 1 node / 8 x V100 and reaches `416.17 tok/s` at c=64.
+- A 1-node 405B attempt cannot support the same workload shape because the available KV cache only supports `480` tokens while the required `max_model_len` is `1024`.
 
-## Experiment Setup
+## 405B Setup
 
 | Item | Setting |
 | --- | --- |
@@ -31,12 +32,29 @@ The main model is `hugging-quants/Meta-Llama-3.1-405B-Instruct-GPTQ-INT4`. It is
 | Max model length | `1024` |
 | GPU memory utilization | `0.94` |
 
+## Qwen MoE Setup
+
+| Item | Setting |
+| --- | --- |
+| Cluster | Taiwania 2 |
+| Allocation | 1 node, 8 x NVIDIA V100-SXM2-32GB, one hour per Slurm job |
+| Model | [`Qwen/Qwen3-235B-A22B-GPTQ-Int4`](https://huggingface.co/Qwen/Qwen3-235B-A22B-GPTQ-Int4) |
+| Framework | vLLM `1.1.0` V100 fork |
+| Quantization | GPTQ INT4 |
+| Parallelism | `TP_SIZE=8`, `PP_SIZE=1`, `distributed_executor_backend=mp` |
+| Attention backend | `FLASH_ATTN_V100` |
+| Target prompt length | `512` tokens |
+| Actual prompt length | `498` tokens |
+| Output length | `128` tokens |
+| Max model length | `1024` |
+| GPU memory utilization | `0.94` |
+
 ## Metrics
 
 - `Concurrency`: the number of in-flight requests served at the same time.
 - `Requests`: the number of measured benchmark requests, excluding warmup.
 - `Aggregate tok/s`: total generated output tokens divided by measured wall time. This is the main throughput metric.
-- `Tok/s/GPU`: aggregate tok/s divided by 16 GPUs.
+- `Tok/s/GPU`: aggregate tok/s divided by the number of GPUs used in that experiment.
 - `Decode tok/s`: mean per-request decoding speed after the first token is produced.
 - `TTFT`: time to first token.
 
@@ -54,6 +72,22 @@ All successful results below use 2 nodes / 16 x V100 with `TP=8`, `PP=2`. This i
 | 32 | 128 | 32 | 32,768 | 79.91 | 10.99x | 4.99 | 51.22 | 10.57 | 3.14 |
 
 The best throughput in this baseline is c=32. However, c=16 is a useful balance point: it reaches `80.5%` of c=32 throughput with much lower mean latency (`31.80s` instead of `51.22s`).
+
+## Qwen MoE Batch Throughput
+
+This sweep uses `Qwen/Qwen3-235B-A22B-GPTQ-Int4` on 1 node / 8 x V100 with `TP=8`, `PP=1`, `max_num_seqs=64`, and `max_num_batched_tokens=65536`.
+
+| Concurrency | Requests | Aggregate tok/s | Speedup | Tok/s/GPU | Mean latency s | Mean TTFT s | Decode tok/s |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 8 | 36.44 | 1.00x | 4.55 | 3.510 | 0.112 | 37.37 |
+| 2 | 8 | 58.17 | 1.60x | 7.27 | 4.392 | 0.156 | 29.99 |
+| 4 | 16 | 106.09 | 2.91x | 13.26 | 4.817 | 0.171 | 27.34 |
+| 8 | 32 | 179.29 | 4.92x | 22.41 | 5.702 | 0.178 | 22.99 |
+| 16 | 64 | 268.97 | 7.38x | 33.62 | 7.604 | 0.203 | 17.16 |
+| 32 | 128 | 350.30 | 9.61x | 43.79 | 11.679 | 0.263 | 11.12 |
+| 64 | 256 | 416.17 | 11.42x | 52.02 | 19.645 | 0.455 | 6.62 |
+
+The MoE run shows the same batching pattern as the 405B run: aggregate throughput rises sharply with concurrency while per-request decode speed falls. Because this model has far fewer active parameters per token, it reaches much higher aggregate throughput even on half as many GPUs.
 
 ## V100 FlashAttention Fork
 
@@ -78,9 +112,9 @@ The cost is per-request responsiveness. As concurrency increases, each request s
 
 From an HPC perspective, the result is still meaningful even though the absolute tok/s is not high. The workload is a 405B-class model on V100 GPUs, and the experiment shows how throughput changes when the same fixed allocation is used for more simultaneous inference work. The V100 FlashAttention fork adds a small high-concurrency gain, but the main lesson remains that batching dominates the throughput improvement.
 
-## Capacity Note
+## 405B Capacity Note
 
-The 1-node / 8 x V100 configuration was tested as a capacity boundary, not as a successful throughput baseline. With `TP=8`, `PP=1`, `max_model_len=1024`, and the same 405B GPTQ INT4 model, vLLM reported that the available KV cache can store only `480` tokens. Therefore this workload shape requires the 2-node setup.
+For the 405B model, the 1-node / 8 x V100 configuration was tested as a capacity boundary, not as a successful throughput baseline. With `TP=8`, `PP=1`, `max_model_len=1024`, and the same 405B GPTQ INT4 model, vLLM reported that the available KV cache can store only `480` tokens. Therefore this workload shape requires the 2-node setup.
 
 This also explains why the 405B result depends on quantization and parallelism. The model can be loaded on the 16-GPU allocation, but memory headroom is still tight enough that context length and KV cache capacity matter.
 
@@ -130,3 +164,11 @@ sbatch slurm/vllm_1cat_llama31_405b_sweep_16v100.slurm
 ```
 
 That script expects a prebuilt vLLM fork environment at `.venv-1cat-vllm-sm70` and runs inside a CUDA 12.8 Apptainer image. The benchmark script counts streaming token events so fixed-length streamed outputs are measured correctly.
+
+The Qwen MoE comparison was run with:
+
+```bash
+sbatch slurm/vllm_1cat_qwen3_235b_moe_sweep_8v100.slurm
+```
+
+It uses the same V100 fork environment and benchmark script.
