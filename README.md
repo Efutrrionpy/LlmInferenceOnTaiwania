@@ -2,7 +2,7 @@
 
 This project studies how far `Llama 3.1 405B GPTQ` inference throughput can be pushed on Taiwania 2 using a fixed HPC allocation: 2 nodes, 16 NVIDIA V100 GPUs, and one hour per Slurm job.
 
-The main result is that continuous batching plus a V100-specific FlashAttention backend improves aggregate output-token throughput from `7.27 tok/s` for a single stock request to `209.50 tok/s` at concurrency `128`.
+The main result is that continuous batching, a V100-specific FlashAttention backend, and true NCCL InfiniBand/GDRDMA transport improve aggregate output-token throughput from `7.27 tok/s` for a single stock request to `351.62 tok/s` at concurrency `128`.
 
 ## Research Question
 
@@ -10,6 +10,7 @@ How much can large-model inference throughput improve on older V100 HPC nodes by
 
 - vLLM continuous batching
 - a V100-compatible FlashAttention backend
+- NCCL transport tuning for cross-node tensor parallelism
 - GPU memory headroom tuning for high concurrency
 
 The focus is throughput for one large dense model, not a broad model leaderboard.
@@ -20,9 +21,11 @@ The focus is throughput for one large dense model, not a broad model leaderboard
 - Stock vLLM uses XFormers on this V100 stack.
 - Stock vLLM improves from `7.27 tok/s` at `c=1` to `120.65 tok/s` at `c=128`.
 - The V100 FlashAttention fork reaches `209.50 tok/s` at `c=128`.
-- The best result is `28.82x` higher than the single-request stock baseline.
+- The best result is `351.62 tok/s` with `TP=16`, `PP=1`, and NCCL `NET/IB` with GDRDMA.
+- The best result is `48.37x` higher than the single-request stock baseline.
 - At `c=128`, `FLASH_ATTN_V100` is `73.6%` faster than stock vLLM (`209.50` vs `120.65 tok/s`).
-- A `TP=16`, `PP=1` check reached only `156.12 tok/s`, so `TP=8`, `PP=2` is the better 2-node mapping for this dense model.
+- The default container path used NCCL Socket transport for the cross-node `TP=16`, `PP=1` run and reached only `156.12 tok/s`.
+- Staging the minimal RDMA userspace libraries into the container enabled NCCL `NET/IB` and `GDRDMA`, raising the same `TP=16`, `PP=1` case to `351.62 tok/s`.
 - The `c=128` runs require `GPU_MEMORY_UTILIZATION=0.88`; higher memory utilization left too little headroom for initialization and KV cache.
 
 ## System And Workload
@@ -34,9 +37,10 @@ The focus is throughput for one large dense model, not a broad model leaderboard
 | Job limit | One hour per Slurm job |
 | Model | `hugging-quants/Meta-Llama-3.1-405B-Instruct-GPTQ-INT4` |
 | Quantization | GPTQ INT4 |
-| Parallelism | `TP=8`, `PP=2` |
+| Parallelism | Best result: `TP=16`, `PP=1`; batching comparison: `TP=8`, `PP=2` |
 | Frameworks | stock vLLM `0.7.0`; V100 fork vLLM `1.1.0` |
 | Attention backends | XFormers / stock; `FLASH_ATTN_V100` |
+| Interconnect path | NCCL Socket; NCCL `NET/IB` with GDRDMA |
 | Target input length | `512` tokens |
 | Actual input length | `497` tokens |
 | Output length | `128` tokens |
@@ -77,14 +81,23 @@ The `FLASH_ATTN_V100` c=128 result was tuned with the decode partition-size knob
 | 512 | 209.50 | 78.09s | 0.80s | 1.64 |
 | 1024 | 195.11 | 83.91s | 0.98s | 1.53 |
 
-A small parallelism mapping check was run at the same c=128 workload:
+The first parallelism mapping check was run at the same c=128 workload:
 
 | Parallelism | Mode | Aggregate tok/s | Mean latency | Mean TTFT | Mean decode tok/s |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `TP=8`, `PP=2` | CUDA graph | 209.50 | 78.09s | 0.80s | 1.64 |
 | `TP=16`, `PP=1` | eager | 156.12 | 104.75s | 1.00s | 1.22 |
 
-The `TP=16`, `PP=1` run uses eager mode to avoid extra CUDA graph memory at c=128. It is still slower, which supports keeping tensor parallelism inside each 8-GPU node and using pipeline parallelism across the two nodes.
+The `TP=16`, `PP=1` run uses eager mode to avoid extra CUDA graph memory at c=128. In the default container environment, it was slower because cross-node tensor-parallel communication used NCCL Socket transport rather than NCCL's InfiniBand transport.
+
+After staging only the RDMA userspace libraries needed by NCCL into the container, the same cross-node tensor-parallel setup used `NET/IB` and `GDRDMA`:
+
+| Parallelism | NCCL transport | Mode | Aggregate tok/s | Mean latency | Mean TTFT | Mean decode tok/s |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| `TP=16`, `PP=1` | Socket | eager | 156.12 | 104.75s | 1.00s | 1.22 |
+| `TP=16`, `PP=1` | `NET/IB` + `GDRDMA` | eager | 351.62 | 46.48s | 0.56s | 2.77 |
+
+This makes NCCL transport the largest HPC-side optimization in the project: enabling true IB/GDRDMA made the cross-node TP run `2.25x` faster than the same run over Socket transport, and `67.8%` faster than the previous `TP=8`, `PP=2` best.
 
 ## Interpretation
 
@@ -92,7 +105,9 @@ Continuous batching is the main throughput lever. On stock vLLM, aggregate throu
 
 The V100 FlashAttention fork matters most at high concurrency. At `c=128`, it increases aggregate throughput by `73.6%` over stock and greatly reduces TTFT. This makes the hardware-oriented optimization visible, not just a parameter tweak.
 
-Parallelism layout matters as well. `TP=8`, `PP=2` keeps tensor-parallel communication within a node, while `TP=16`, `PP=1` spreads tensor-parallel work across both nodes and drops throughput by about `25.5%` in the successful eager run.
+Parallelism layout depends on the interconnect actually exposed inside the container. With Socket transport, `TP=8`, `PP=2` is better because tensor-parallel collectives stay inside each 8-GPU node. With NCCL `NET/IB` and GDRDMA available, `TP=16`, `PP=1` becomes the fastest configuration because cross-node tensor-parallel collectives are no longer forced through Socket transport.
+
+This is the most HPC-specific result in the study. The benchmark did not only tune batch size or vLLM flags; it exposed a container/runtime issue where the job was using an IB network interface but not the NCCL InfiniBand transport. Fixing that transport path improved the final dense-model throughput more than the attention backend alone.
 
 The tradeoff is latency. More simultaneous requests keep the GPUs busier, but each request spends more time waiting behind prefill and batched decoding work. The result is suitable for throughput-oriented offline or batched serving workloads, not low-latency interactive serving.
 
@@ -155,6 +170,30 @@ RUNS_PER_CONCURRENCY_FACTOR=2 \
 VLLM_FLASH_V100_DECODE_PARTITION_SIZE=512 \
 sbatch slurm/vllm_1cat_llama31_405b_sweep_16v100.slurm
 ```
+
+Run the NCCL IB/GDRDMA comparison by staging the host RDMA userspace libraries into a small directory during a Slurm job, then passing that directory into the container:
+
+```bash
+EXPERIMENT_NAME=1cat-llama31-405b-c128-tp16-pp1-eager-ib-p512 \
+TP_SIZE=16 \
+PP_SIZE=1 \
+GPU_MEMORY_UTILIZATION=0.88 \
+MAX_NUM_SEQS=128 \
+CONCURRENCY_LEVELS=128 \
+RUNS_PER_CONCURRENCY_FACTOR=2 \
+VLLM_FLASH_V100_DECODE_PARTITION_SIZE=512 \
+VLLM_FLASH_V100_ENABLE_PAGED_PREFILL=1 \
+EXTRA_VLLM_ARGS=--enforce-eager \
+NCCL_IB_DISABLE=0 \
+NCCL_DEBUG=INFO \
+NCCL_DEBUG_SUBSYS=INIT,NET \
+APPTAINERENV_LD_LIBRARY_PATH=/path/to/rdma-libs:${LD_LIBRARY_PATH:-} \
+APPTAINERENV_LIBIBVERBS_DRIVER_DIR=/path/to/rdma-libs \
+LIBIBVERBS_DRIVER_DIR=/path/to/rdma-libs \
+sbatch slurm/vllm_1cat_llama31_405b_sweep_16v100.slurm
+```
+
+The expected NCCL evidence in `vllm-server.log` is `Using network IB` plus channels marked `via NET/IB/.../GDRDMA`.
 
 That script expects a prebuilt vLLM fork environment at `.venv-1cat-vllm-sm70` and runs inside a CUDA 12.8 Apptainer image. The benchmark script counts streaming token events so fixed-length streamed outputs are measured correctly.
 
