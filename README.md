@@ -75,9 +75,7 @@ The second part asks whether the two-node allocation should be used as pipeline 
 
 The `c=160` run adds `8.9%` throughput over the controlled `c=128` result, but latency rises from `46.48s` to `53.37s`. It is useful for offline-throughput measurement, while `c=128` is the cleaner controlled comparison.
 
-## NCCL Transport Check
-
-To verify that the optimized run is not merely using an IB IP interface through Socket, I ran a two-node PyTorch/NCCL all-reduce microbenchmark on all 16 GPUs. The logs show `Using network IB`, GPU Direct RDMA enabled, and cross-node channels marked as `NET/IB/.../GDRDMA`.
+A two-node PyTorch/NCCL all-reduce microbenchmark was also used to confirm that the optimized run was not merely using an IB IP interface through Socket. The logs show `Using network IB`, GPU Direct RDMA enabled, and cross-node channels marked as `NET/IB/.../GDRDMA`.
 
 | All-reduce message size | Socket bus bandwidth | IB/GDRDMA bus bandwidth | Speedup |
 | ---: | ---: | ---: | ---: |
