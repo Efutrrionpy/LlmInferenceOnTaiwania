@@ -42,7 +42,7 @@ The main comparison is controlled at `c=128` after the single-request baseline. 
 | V100 FlashAttention | `FLASH_ATTN_V100` | `TP=8`, `PP=2` | 128 | 209.50 | 28.82x |
 | Cross-node TP without IB transport | `FLASH_ATTN_V100` + Socket | `TP=16`, `PP=1` | 128 | 156.12 | 21.47x |
 | Cross-node TP with IB/GDRDMA | `FLASH_ATTN_V100` + NCCL `NET/IB` | `TP=16`, `PP=1` | 128 | 351.62 | 48.37x |
-| Higher-concurrency run | same as above | `TP=16`, `PP=1` | 160 | 382.80 | 52.65x |
+| Higher-concurrency run | `FLASH_ATTN_V100` + NCCL `NET/IB`| `TP=16`, `PP=1` | 160 | 382.80 | 52.65x |
 
 The important point is that `TP=16`, `PP=1` is only good after NCCL uses InfiniBand transport. With Socket transport, cross-node tensor parallelism is slower than the simpler `TP=8`, `PP=2` layout. With `NET/IB` and GDRDMA, it becomes the best layout.
 
