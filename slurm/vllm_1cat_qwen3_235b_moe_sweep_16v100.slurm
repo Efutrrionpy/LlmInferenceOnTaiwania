@@ -37,6 +37,8 @@ INPUT_TOKENS="${INPUT_TOKENS:-512}"
 OUTPUT_TOKENS="${OUTPUT_TOKENS:-128}"
 WARMUP="${WARMUP:-1}"
 EXTRA_VLLM_ARGS="${EXTRA_VLLM_ARGS:-}"
+ATTENTION_BACKEND="${ATTENTION_BACKEND:-FLASH_ATTN_V100}"
+SERVER_START_TIMEOUT="${SERVER_START_TIMEOUT:-2400}"
 
 HF_CACHE_ROOT="${HF_CACHE_ROOT:-/work/${USER}/hf-cache-qwen3-235b-a22b-gptq}"
 export HF_HOME="${HF_HOME:-${HF_CACHE_ROOT}}"
@@ -90,6 +92,8 @@ echo "Concurrency levels: ${CONCURRENCY_LEVELS}"
 echo "Max model len: ${MAX_MODEL_LEN}"
 echo "Max num seqs: ${MAX_NUM_SEQS}"
 echo "Max batched tokens: ${MAX_NUM_BATCHED_TOKENS}"
+echo "Attention backend: ${ATTENTION_BACKEND}"
+echo "Server start timeout: ${SERVER_START_TIMEOUT}s"
 echo "Image: ${IMAGE}"
 echo "Python: ${PYBIN}"
 echo "HF_HOME: ${HF_HOME}"
@@ -110,11 +114,13 @@ CONCURRENCY_LEVELS=${CONCURRENCY_LEVELS}
 INPUT_TOKENS=${INPUT_TOKENS}
 OUTPUT_TOKENS=${OUTPUT_TOKENS}
 WARMUP=${WARMUP}
+EXTRA_VLLM_ARGS=${EXTRA_VLLM_ARGS}
 HF_HOME=${HF_HOME}
 NODE_COUNT=${NODE_COUNT}
 GPUS_PER_NODE=${GPUS_PER_NODE}
 IMAGE=${IMAGE}
-VLLM_ATTENTION_BACKEND=FLASH_ATTN_V100
+VLLM_ATTENTION_BACKEND=${ATTENTION_BACKEND}
+SERVER_START_TIMEOUT=${SERVER_START_TIMEOUT}
 VLLM_USE_V1=1
 EOF
 
@@ -189,7 +195,7 @@ export CXX="\${CXX:-g++}"
 export RAY_ADDRESS="${RAY_ADDRESS}"
 export VLLM_HOST_IP="${HEAD_IP}"
 export VLLM_USE_V1="1"
-export VLLM_ATTENTION_BACKEND="FLASH_ATTN_V100"
+export VLLM_ATTENTION_BACKEND="${ATTENTION_BACKEND}"
 export VLLM_LOGGING_LEVEL="INFO"
 exec "${PYBIN}" -m vllm.entrypoints.openai.api_server \\
   --host 0.0.0.0 \\
@@ -272,7 +278,11 @@ start_vllm_server() {
 }
 
 wait_for_server_or_die() {
-  for _ in $(seq 1 480); do
+  local attempts=$((SERVER_START_TIMEOUT / 5))
+  if [ "${attempts}" -lt 1 ]; then
+    attempts=1
+  fi
+  for _ in $(seq 1 "${attempts}"); do
     if [ -n "${SERVER_PID}" ] && ! kill -0 "${SERVER_PID}" 2>/dev/null; then
       echo "vLLM server exited before becoming ready" >&2
       tail -n 120 "${RUN_DIR}/vllm-server.log" >&2 || true

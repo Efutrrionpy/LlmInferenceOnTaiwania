@@ -2,7 +2,7 @@
 
 This repository documents focused LLM inference experiments on Taiwania 2 using one-hour HPC allocations on NVIDIA V100 nodes. The main experiment asks how much aggregate output-token throughput can be improved for a 405B-class GPTQ model by using vLLM continuous batching, then checks a V100-specific FlashAttention fork as a hardware-oriented extension.
 
-The repository also includes a successful Qwen MoE contrast using `Qwen/Qwen3-235B-A22B-GPTQ-Int4` on 1 node / 8 x V100. This is not an apples-to-apples model comparison: the Qwen model is much faster because it is a sparse MoE model with fewer active parameters per generated token.
+The repository also includes successful Qwen MoE contrasts using `Qwen/Qwen3-235B-A22B-GPTQ-Int4` on 1 node / 8 x V100 and `Qwen/Qwen3.5-397B-A17B-GPTQ-Int4` on 2 nodes / 16 x V100. These are not apples-to-apples model comparisons: the Qwen models are sparse MoE models with fewer active parameters per generated token.
 
 ## TL;DR
 
@@ -13,6 +13,7 @@ The repository also includes a successful Qwen MoE contrast using `Qwen/Qwen3-23
 - On the stock V100/vLLM stack, the attention backend is XFormers, not FlashAttention.
 - A V100-specific vLLM fork with `FLASH_ATTN_V100` raises the c=32 result to `83.73 tok/s`, but it is not uniformly faster at every concurrency level.
 - The Qwen MoE GPTQ INT4 contrast runs on 1 node / 8 x V100 and reaches `416.17 tok/s` at c=64.
+- The larger Qwen3.5 397B-A17B GPTQ INT4 MoE run loads on 2 nodes / 16 x V100 with `TP=16`, `PP=1`, and reaches `66.71 tok/s` at c=32 using `FLASH_ATTN_V100`.
 - A 1-node 405B attempt cannot support the same workload shape because the available KV cache only supports `480` tokens while the required `max_model_len` is `1024`.
 
 ## 405B Setup
@@ -48,6 +49,23 @@ The repository also includes a successful Qwen MoE contrast using `Qwen/Qwen3-23
 | Output length | `128` tokens |
 | Max model length | `1024` |
 | GPU memory utilization | `0.94` |
+
+## Qwen3.5 397B MoE Setup
+
+| Item | Setting |
+| --- | --- |
+| Cluster | Taiwania 2 |
+| Allocation | 2 nodes, 16 x NVIDIA V100-SXM2-32GB, one hour per Slurm job |
+| Model | [`Qwen/Qwen3.5-397B-A17B-GPTQ-Int4`](https://huggingface.co/Qwen/Qwen3.5-397B-A17B-GPTQ-Int4) |
+| Framework | vLLM `1.1.0` V100 fork |
+| Quantization | GPTQ INT4 |
+| Parallelism | `TP_SIZE=16`, `PP_SIZE=1`, `distributed_executor_backend=ray` |
+| Attention backend | `FLASH_ATTN_V100` |
+| Target prompt length | `512` tokens |
+| Actual prompt length | `498` tokens |
+| Output length | `128` tokens |
+| Max model length | `1024` |
+| GPU memory utilization | `0.92` |
 
 ## Metrics
 
@@ -88,6 +106,21 @@ This sweep uses `Qwen/Qwen3-235B-A22B-GPTQ-Int4` on 1 node / 8 x V100 with `TP=8
 | 64 | 256 | 416.17 | 11.42x | 52.02 | 19.645 | 0.455 | 6.62 |
 
 The MoE run shows the same batching pattern as the 405B run: aggregate throughput rises sharply with concurrency while per-request decode speed falls. Because this model has far fewer active parameters per token, it reaches much higher aggregate throughput even on half as many GPUs.
+
+## Qwen3.5 397B MoE Batch Throughput
+
+This sweep uses `Qwen/Qwen3.5-397B-A17B-GPTQ-Int4` on 2 nodes / 16 x V100 with `TP=16`, `PP=1`, `max_num_seqs=32`, `max_num_batched_tokens=8192`, and `FLASH_ATTN_V100`.
+
+| Concurrency | Requests | Aggregate tok/s | Speedup | Tok/s/GPU | Mean latency s | Mean TTFT s | Decode tok/s |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 4 | 20.46 | 1.00x | 1.28 | 6.252 | 2.658 | 35.33 |
+| 2 | 4 | 25.70 | 1.26x | 1.61 | 9.943 | 4.120 | 23.21 |
+| 4 | 8 | 39.88 | 1.95x | 2.49 | 12.827 | 6.572 | 22.19 |
+| 8 | 16 | 53.99 | 2.64x | 3.37 | 18.951 | 11.635 | 19.33 |
+| 16 | 32 | 60.95 | 2.98x | 3.81 | 33.587 | 23.084 | 13.27 |
+| 32 | 64 | 66.71 | 3.26x | 4.17 | 61.360 | 32.914 | 5.20 |
+
+For this larger MoE model, batching still improves aggregate throughput, but the gain is smaller than the 235B-A22B sweep. The c=32 result is the highest throughput point, while c=16 is a more balanced point with `91.4%` of peak throughput and much lower latency.
 
 ## V100 FlashAttention Fork
 
@@ -172,3 +205,11 @@ sbatch slurm/vllm_1cat_qwen3_235b_moe_sweep_8v100.slurm
 ```
 
 It uses the same V100 fork environment and benchmark script.
+
+The larger Qwen3.5 397B MoE sweep was run with:
+
+```bash
+sbatch slurm/vllm_1cat_qwen35_397b_moe_sweep_16v100.slurm
+```
+
+The same shared sweep driver exposes `ATTENTION_BACKEND` for additional backend experiments.
