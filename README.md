@@ -2,9 +2,9 @@
 
 This project studies throughput-oriented inference for one large dense model on a fixed HPC allocation: 2 nodes, 16 NVIDIA V100 GPUs, and one hour per Slurm job.
 
-The main result is a controlled improvement from `7.27 tok/s` for one stock vLLM request to `351.62 tok/s` at `c=128` after batching, a V100-compatible FlashAttention backend, and NCCL InfiniBand/GDRDMA transport. The best observed peak is `382.80 tok/s` at `c=160`.
+Using the same allocation, throughput improved from `7.27 tok/s` for one stock vLLM request to `351.62 tok/s` at `c=128` after batching, a V100-compatible FlashAttention backend, and NCCL InfiniBand/GDRDMA transport. The highest measured throughput was `382.80 tok/s` at `c=160`.
 
-The report is intentionally centered on one workload instead of a model comparison. The question is:
+The experiment uses one main workload rather than comparing many models. The question is:
 
 > How much can large-model inference throughput improve on older V100 HPC nodes when inference is treated as a systems problem?
 
@@ -31,9 +31,9 @@ The three systems levers are:
 
 `Concurrency` is the number of in-flight requests. `Aggregate tok/s` is total generated output tokens divided by benchmark wall time.
 
-## Results At A Glance
+## Main Results
 
-The main comparison is controlled at `c=128` after the single-request baseline. This keeps request pressure fixed while changing one systems lever at a time. The final `c=160` row is reported separately as the peak batch setting.
+The main comparison is controlled at `c=128` after the single-request baseline. This keeps request pressure fixed while changing one systems lever at a time. The final `c=160` row is included as a higher-concurrency run.
 
 | Step | Configuration | Parallelism | Concurrency | Aggregate tok/s | vs baseline |
 | --- | --- | --- | ---: | ---: | ---: |
@@ -42,7 +42,7 @@ The main comparison is controlled at `c=128` after the single-request baseline. 
 | V100 FlashAttention | `FLASH_ATTN_V100` | `TP=8`, `PP=2` | 128 | 209.50 | 28.82x |
 | Cross-node TP without IB transport | `FLASH_ATTN_V100` + Socket | `TP=16`, `PP=1` | 128 | 156.12 | 21.47x |
 | Cross-node TP with IB/GDRDMA | `FLASH_ATTN_V100` + NCCL `NET/IB` | `TP=16`, `PP=1` | 128 | 351.62 | 48.37x |
-| Peak batch setting | same as above | `TP=16`, `PP=1` | 160 | 382.80 | 52.65x |
+| Higher-concurrency run | same as above | `TP=16`, `PP=1` | 160 | 382.80 | 52.65x |
 
 The important point is that `TP=16`, `PP=1` is only good after NCCL uses InfiniBand transport. With Socket transport, cross-node tensor parallelism is slower than the simpler `TP=8`, `PP=2` layout. With `NET/IB` and GDRDMA, it becomes the best layout.
 
@@ -73,7 +73,7 @@ The second part asks whether the two-node allocation should be used as pipeline 
 
 `TP=8`, `PP=2` keeps tensor-parallel collectives inside each 8-GPU node, so enabling IB/GDRDMA does not improve throughput. `TP=16`, `PP=1` spreads tensor-parallel collectives across both nodes. That layout is bad with Socket transport, but it reaches `351.62 tok/s` at `c=128` once NCCL uses `NET/IB` with GDRDMA.
 
-The `c=160` run adds `8.9%` throughput over the controlled `c=128` result, but latency rises from `46.48s` to `53.37s`. It is useful as a peak offline-throughput setting, not as the cleaner controlled comparison.
+The `c=160` run adds `8.9%` throughput over the controlled `c=128` result, but latency rises from `46.48s` to `53.37s`. It is useful for offline-throughput measurement, while `c=128` is the cleaner controlled comparison.
 
 ## NCCL Transport Check
 
@@ -102,7 +102,7 @@ The `TP=8`, `PP=2` layout keeps tensor parallelism local to each node, but the p
 
 The `TP=16`, `PP=1` layout removes that pipeline imbalance and makes all 16 GPUs participate in one tensor-parallel group. That is why the GPU utilization becomes much more balanced once NCCL transport is fixed.
 
-The `c=160` profiling rerun is lower than the non-profile peak run (`364.77` vs `382.80 tok/s`), so it is used as utilization evidence rather than as the headline throughput number.
+The `c=160` profiling rerun is lower than the non-profile `c=160` run (`364.77` vs `382.80 tok/s`), so it is used as utilization evidence rather than as the main throughput number.
 
 ## Interpretation
 
@@ -112,9 +112,9 @@ The V100 FlashAttention backend matters after batching exposes enough work. At `
 
 The HPC-specific result is the topology and transport interaction. Cross-node tensor parallelism is not automatically better. It becomes better only after the container exposes the RDMA userspace libraries needed for NCCL `NET/IB` and GDRDMA.
 
-The final result targets offline or batched serving throughput. The clean controlled result is `351.62 tok/s` at `c=128`; the peak observed result is `382.80 tok/s` at `c=160`.
+The final result targets offline or batched serving throughput. The clean controlled result is `351.62 tok/s` at `c=128`; the highest measured result is `382.80 tok/s` at `c=160`.
 
-## Scope Checks
+## Additional Experiments
 
 These checks are included only to define the boundary of the main experiment.
 
@@ -122,7 +122,7 @@ A 1-node / 8 x V100 run was tested for `Llama 3.1 405B GPTQ`. With `TP=8`, `PP=1
 
 Two MoE models were tested as feasibility checks. They are not part of the main comparison because sparse MoE models have fewer active parameters per generated token.
 
-| Model | Allocation | Parallelism | Backend | Peak aggregate tok/s |
+| Model | Allocation | Parallelism | Backend | Highest aggregate tok/s |
 | --- | --- | --- | --- | ---: |
 | `Qwen3 235B-A22B MoE GPTQ` | 1 node / 8 x V100 | `TP=8`, `PP=1` | `FLASH_ATTN_V100` | 416.17 @ c=64 |
 | `Qwen3.5 397B-A17B MoE GPTQ` | 2 nodes / 16 x V100 | `TP=16`, `PP=1` | `FLASH_ATTN_V100` | 74.16 @ c=64 |
