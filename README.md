@@ -76,66 +76,26 @@ The repository also includes successful Qwen MoE contrasts using `Qwen/Qwen3-235
 - `Decode tok/s`: mean per-request decoding speed after the first token is produced.
 - `TTFT`: time to first token.
 
-## 405B Batch Throughput
+## Integrated Results
 
-All successful results below use 2 nodes / 16 x V100 with `TP=8`, `PP=2`. This is the stock vLLM baseline.
+The main comparison uses peak aggregate output-token throughput for each model and attention backend. `XFormers / stock` is the stock vLLM attention path for the 405B baseline. The Qwen MoE rows use the V100 fork.
 
-| Concurrency | Requests | Max seqs | Batched toks | Aggregate tok/s | Speedup | Tok/s/GPU | Mean latency s | Mean TTFT s | Decode tok/s |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 8 | 1 | 2,048 | 7.27 | 1.00x | 0.45 | 17.60 | 1.05 | 7.67 |
-| 2 | 8 | 2 | 2,048 | 13.25 | 1.82x | 0.83 | 19.28 | 1.61 | 7.19 |
-| 4 | 16 | 4 | 4,096 | 24.65 | 3.39x | 1.54 | 20.75 | 2.01 | 6.78 |
-| 8 | 32 | 8 | 8,192 | 42.77 | 5.88x | 2.67 | 23.92 | 3.25 | 6.16 |
-| 16 | 64 | 16 | 16,384 | 64.36 | 8.85x | 4.02 | 31.80 | 5.65 | 4.88 |
-| 32 | 128 | 32 | 32,768 | 79.91 | 10.99x | 4.99 | 51.22 | 10.57 | 3.14 |
+| Model | Allocation | Parallelism | XFormers / stock peak | `FLASH_ATTN_V100` peak | Flash gain |
+| --- | --- | --- | ---: | ---: | ---: |
+| Llama 3.1 405B GPTQ | 2 nodes / 16 x V100 | `TP=8`, `PP=2` | 79.91 tok/s @ c=32 | 83.73 tok/s @ c=32 | +4.7% |
+| Qwen3 235B-A22B MoE GPTQ | 1 node / 8 x V100 | `TP=8`, `PP=1` | not measured | 416.17 tok/s @ c=64 | n/a |
+| Qwen3.5 397B-A17B MoE GPTQ | 2 nodes / 16 x V100 | `TP=16`, `PP=1` | not available | 66.71 tok/s @ c=32 | n/a |
 
-The best throughput in this baseline is c=32. However, c=16 is a useful balance point: it reaches `80.5%` of c=32 throughput with much lower mean latency (`31.80s` instead of `51.22s`).
+The batch-throughput sweep below reports aggregate output tok/s. It shows how concurrency increases total throughput while also increasing per-request latency.
 
-## Qwen MoE Batch Throughput
+| Model | Attention | GPUs | c=1 | c=2 | c=4 | c=8 | c=16 | c=32 | c=64 | Peak tok/s |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Llama 3.1 405B GPTQ | XFormers / stock | 16 | 7.27 | 13.25 | 24.65 | 42.77 | 64.36 | 79.91 |  | 79.91 |
+| Llama 3.1 405B GPTQ | `FLASH_ATTN_V100` | 16 | 7.12 | 13.70 | 25.66 | 43.39 | 57.42 | 83.73 |  | 83.73 |
+| Qwen3 235B-A22B MoE GPTQ | `FLASH_ATTN_V100` | 8 | 36.44 | 58.17 | 106.09 | 179.29 | 268.97 | 350.30 | 416.17 | 416.17 |
+| Qwen3.5 397B-A17B MoE GPTQ | `FLASH_ATTN_V100` | 16 | 20.46 | 25.70 | 39.88 | 53.99 | 60.95 | 66.71 |  | 66.71 |
 
-This sweep uses `Qwen/Qwen3-235B-A22B-GPTQ-Int4` on 1 node / 8 x V100 with `TP=8`, `PP=1`, `max_num_seqs=64`, and `max_num_batched_tokens=65536`.
-
-| Concurrency | Requests | Aggregate tok/s | Speedup | Tok/s/GPU | Mean latency s | Mean TTFT s | Decode tok/s |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 8 | 36.44 | 1.00x | 4.55 | 3.510 | 0.112 | 37.37 |
-| 2 | 8 | 58.17 | 1.60x | 7.27 | 4.392 | 0.156 | 29.99 |
-| 4 | 16 | 106.09 | 2.91x | 13.26 | 4.817 | 0.171 | 27.34 |
-| 8 | 32 | 179.29 | 4.92x | 22.41 | 5.702 | 0.178 | 22.99 |
-| 16 | 64 | 268.97 | 7.38x | 33.62 | 7.604 | 0.203 | 17.16 |
-| 32 | 128 | 350.30 | 9.61x | 43.79 | 11.679 | 0.263 | 11.12 |
-| 64 | 256 | 416.17 | 11.42x | 52.02 | 19.645 | 0.455 | 6.62 |
-
-The MoE run shows the same batching pattern as the 405B run: aggregate throughput rises sharply with concurrency while per-request decode speed falls. Because this model has far fewer active parameters per token, it reaches much higher aggregate throughput even on half as many GPUs.
-
-## Qwen3.5 397B MoE Batch Throughput
-
-This sweep uses `Qwen/Qwen3.5-397B-A17B-GPTQ-Int4` on 2 nodes / 16 x V100 with `TP=16`, `PP=1`, `max_num_seqs=32`, `max_num_batched_tokens=8192`, and `FLASH_ATTN_V100`.
-
-| Concurrency | Requests | Aggregate tok/s | Speedup | Tok/s/GPU | Mean latency s | Mean TTFT s | Decode tok/s |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 4 | 20.46 | 1.00x | 1.28 | 6.252 | 2.658 | 35.33 |
-| 2 | 4 | 25.70 | 1.26x | 1.61 | 9.943 | 4.120 | 23.21 |
-| 4 | 8 | 39.88 | 1.95x | 2.49 | 12.827 | 6.572 | 22.19 |
-| 8 | 16 | 53.99 | 2.64x | 3.37 | 18.951 | 11.635 | 19.33 |
-| 16 | 32 | 60.95 | 2.98x | 3.81 | 33.587 | 23.084 | 13.27 |
-| 32 | 64 | 66.71 | 3.26x | 4.17 | 61.360 | 32.914 | 5.20 |
-
-For this larger MoE model, batching still improves aggregate throughput, but the gain is smaller than the 235B-A22B sweep. The c=32 result is the highest throughput point, while c=16 is a more balanced point with `91.4%` of peak throughput and much lower latency.
-
-## V100 FlashAttention Fork
-
-The hardware-specific comparison uses a vLLM fork with `FLASH_ATTN_V100`, the same 405B GPTQ model, and the same 2-node `TP=8`, `PP=2` layout. For this sweep, `max_num_seqs=32` and `max_num_batched_tokens=32768` are fixed for all rows.
-
-| Concurrency | Requests | Aggregate tok/s | Speedup | Tok/s/GPU | Mean latency s | Mean TTFT s | Decode tok/s |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 8 | 7.12 | 1.00x | 0.45 | 17.988 | 0.144 | 7.12 |
-| 2 | 8 | 13.70 | 1.92x | 0.86 | 18.665 | 0.310 | 6.92 |
-| 4 | 16 | 25.66 | 3.60x | 1.60 | 19.943 | 0.412 | 6.50 |
-| 8 | 32 | 43.39 | 6.09x | 2.71 | 23.586 | 0.357 | 5.47 |
-| 16 | 64 | 57.42 | 8.06x | 3.59 | 35.646 | 0.535 | 3.62 |
-| 32 | 128 | 83.73 | 11.76x | 5.23 | 48.905 | 0.460 | 2.62 |
-
-The fork is useful as an HPC-oriented experiment because it changes the GPU attention kernel path. It improves the highest-throughput point by about `4.8%` over stock vLLM c=32 (`83.73` vs `79.91 tok/s`) and greatly lowers TTFT. It does not dominate the stock baseline at every point: c=16 is lower than the stock result (`57.42` vs `64.36 tok/s`).
+The 405B model is the only complete two-backend comparison. The V100 FlashAttention fork improves the highest-throughput point by about `4.7%` over stock vLLM c=32 (`83.73` vs `79.91 tok/s`) and greatly lowers TTFT. For the larger Qwen3.5 MoE model, `FLASH_ATTN_V100` is the successful backend in this environment.
 
 ## Interpretation
 
