@@ -2,7 +2,7 @@
 
 This project evaluates throughput-oriented inference optimization for `Llama 3.1 405B GPTQ` on Taiwania 2 under a fixed HPC allocation: 2 nodes, 16 NVIDIA V100 GPUs, and one hour per Slurm job.
 
-The main result is that the workload improves from `7.27 tok/s` for a single stock vLLM request to `351.62 tok/s` with continuous batching, a V100-compatible FlashAttention backend, and NCCL InfiniBand/GDRDMA transport. That is a `48.37x` improvement on the same 16-GPU allocation.
+The main result is that the workload improves from `7.27 tok/s` for a single stock vLLM request to `382.80 tok/s` with continuous batching, a V100-compatible FlashAttention backend, and NCCL InfiniBand/GDRDMA transport. That is a `52.65x` improvement on the same 16-GPU allocation.
 
 ## Research Question
 
@@ -42,7 +42,7 @@ The optimization path is:
 | Stock single request | stock vLLM / XFormers | `TP=8`, `PP=2` | 1 | 7.27 | 1.00x |
 | Continuous batching | stock vLLM / XFormers | `TP=8`, `PP=2` | 128 | 120.65 | 16.60x |
 | V100 FlashAttention | `FLASH_ATTN_V100` | `TP=8`, `PP=2` | 128 | 209.50 | 28.82x |
-| NCCL IB/GDRDMA | `FLASH_ATTN_V100` + NCCL `NET/IB` | `TP=16`, `PP=1` | 128 | 351.62 | 48.37x |
+| NCCL IB/GDRDMA | `FLASH_ATTN_V100` + NCCL `NET/IB` | `TP=16`, `PP=1` | 160 | 382.80 | 52.65x |
 
 The final result is not just a larger batch size. The largest HPC-specific gain came from exposing the correct NCCL InfiniBand transport inside the container. Without that, the same cross-node tensor-parallel layout was slower than the `TP=8`, `PP=2` layout.
 
@@ -63,18 +63,19 @@ For the FlashAttention run, decode partition size `512` was selected because it 
 
 The most important HPC result is that the interconnect transport changes which parallelism layout is best.
 
-| Parallelism | NCCL transport | Mode | Aggregate tok/s | Mean latency | Mean TTFT | Mean decode tok/s |
-| --- | --- | --- | ---: | ---: | ---: | ---: |
-| `TP=8`, `PP=2` | default | CUDA graph | 209.50 | 78.09s | 0.80s | 1.64 |
-| `TP=8`, `PP=2` | `NET/IB` + `GDRDMA` | CUDA graph | 204.70 | 80.00s | 0.75s | 1.60 |
-| `TP=16`, `PP=1` | Socket | eager | 156.12 | 104.75s | 1.00s | 1.22 |
-| `TP=16`, `PP=1` | `NET/IB` + `GDRDMA` | eager | 351.62 | 46.48s | 0.56s | 2.77 |
+| Parallelism | NCCL transport | Mode | Concurrency | Aggregate tok/s | Mean latency | Mean TTFT | Mean decode tok/s |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `TP=8`, `PP=2` | default | CUDA graph | 128 | 209.50 | 78.09s | 0.80s | 1.64 |
+| `TP=8`, `PP=2` | `NET/IB` + `GDRDMA` | CUDA graph | 128 | 204.70 | 80.00s | 0.75s | 1.60 |
+| `TP=16`, `PP=1` | Socket | eager | 128 | 156.12 | 104.75s | 1.00s | 1.22 |
+| `TP=16`, `PP=1` | `NET/IB` + `GDRDMA` | eager | 128 | 351.62 | 46.48s | 0.56s | 2.77 |
+| `TP=16`, `PP=1` | `NET/IB` + `GDRDMA` | eager | 160 | 382.80 | 53.37s | 0.64s | 2.41 |
 
 The interpretation is:
 
 - `TP=8`, `PP=2` keeps tensor-parallel collectives inside each 8-GPU node. Adding IB/GDRDMA to this layout does not improve throughput (`209.50` to `204.70 tok/s`).
 - `TP=16`, `PP=1` spreads tensor-parallel collectives across both nodes. With Socket transport it reaches only `156.12 tok/s`.
-- After staging the minimal RDMA userspace libraries into the container, NCCL uses `NET/IB` with `GDRDMA`, and the same `TP=16`, `PP=1` layout reaches `351.62 tok/s`.
+- After staging the minimal RDMA userspace libraries into the container, NCCL uses `NET/IB` with `GDRDMA`, and the same `TP=16`, `PP=1` layout reaches `351.62 tok/s` at `c=128` and `382.80 tok/s` at `c=160`.
 
 This makes NCCL transport the main HPC-side optimization. The job was already using an IB network interface, but NCCL was not using the InfiniBand transport until the container could see the required RDMA userspace libraries.
 
@@ -99,7 +100,7 @@ The V100 FlashAttention backend matters at high concurrency. At `c=128`, it rais
 
 NCCL transport matters only when the parallelism layout generates heavy cross-node tensor-parallel communication. This is why `TP=16`, `PP=1` is poor with Socket transport but becomes the best result with NCCL `NET/IB` and GDRDMA.
 
-The result targets offline or batched serving throughput. Higher concurrency improves aggregate tok/s but increases per-request latency.
+The result targets offline or batched serving throughput. Higher concurrency improves aggregate tok/s but increases per-request latency: the best `c=160` run reaches `382.80 tok/s`, while the lower-latency `c=128` run reaches `351.62 tok/s`.
 
 ## Boundary Checks
 
@@ -133,15 +134,15 @@ VLLM_FLASH_V100_DECODE_PARTITION_SIZE=512 \
 sbatch slurm/vllm_1cat_llama31_405b_sweep_16v100.slurm
 ```
 
-Run the NCCL IB/GDRDMA comparison after staging the host RDMA userspace libraries into a small directory during a Slurm job:
+Run the best NCCL IB/GDRDMA configuration after staging the host RDMA userspace libraries into a small directory during a Slurm job:
 
 ```bash
-EXPERIMENT_NAME=1cat-llama31-405b-c128-tp16-pp1-eager-ib-p512 \
+EXPERIMENT_NAME=1cat-llama31-405b-c160-tp16-pp1-eager-ib-p512 \
 TP_SIZE=16 \
 PP_SIZE=1 \
 GPU_MEMORY_UTILIZATION=0.88 \
-MAX_NUM_SEQS=128 \
-CONCURRENCY_LEVELS=128 \
+MAX_NUM_SEQS=160 \
+CONCURRENCY_LEVELS=160 \
 RUNS_PER_CONCURRENCY_FACTOR=2 \
 VLLM_FLASH_V100_DECODE_PARTITION_SIZE=512 \
 VLLM_FLASH_V100_ENABLE_PAGED_PREFILL=1 \
