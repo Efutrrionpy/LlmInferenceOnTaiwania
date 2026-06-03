@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """Summarize lightweight nvidia-smi CSV profiles."""
 
-from __future__ import annotations
-
 import argparse
 import csv
 import json
 from datetime import datetime
 from pathlib import Path
 from statistics import mean
+from typing import Any, Dict, List, Optional
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("csv_files", nargs="+", type=Path)
     parser.add_argument("--window-start", type=Path)
@@ -21,7 +20,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def parse_time(value: str) -> datetime | None:
+def parse_time(value):
     value = value.strip()
     for fmt in ("%Y/%m/%d %H:%M:%S.%f", "%Y/%m/%d %H:%M:%S"):
         try:
@@ -31,13 +30,13 @@ def parse_time(value: str) -> datetime | None:
     return None
 
 
-def read_time_file(path: Path | None) -> datetime | None:
+def read_time_file(path):
     if not path or not path.exists():
         return None
     return parse_time(path.read_text(encoding="utf-8").strip().splitlines()[0])
 
 
-def get_value(row: dict[str, str], prefix: str) -> str:
+def get_value(row, prefix):
     prefix = prefix.lower()
     for key, value in row.items():
         if key.strip().lower().startswith(prefix):
@@ -45,7 +44,7 @@ def get_value(row: dict[str, str], prefix: str) -> str:
     return ""
 
 
-def parse_float(value: str) -> float | None:
+def parse_float(value):
     if not value:
         return None
     try:
@@ -54,16 +53,19 @@ def parse_float(value: str) -> float | None:
         return None
 
 
-def source_name(path: Path) -> str:
+def source_name(path):
     name = path.stem
-    return name.removeprefix("gpu-profile-")
+    prefix = "gpu-profile-"
+    if name.startswith(prefix):
+        return name[len(prefix):]
+    return name
 
 
-def load_rows(path: Path, start: datetime | None, end: datetime | None) -> list[dict[str, float | str]]:
+def load_rows(path, start, end):
     if not path.exists():
         return []
 
-    rows: list[dict[str, float | str]] = []
+    rows = []  # type: List[Dict[str, Any]]
     with path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         for raw in reader:
@@ -101,7 +103,7 @@ def load_rows(path: Path, start: datetime | None, end: datetime | None) -> list[
     return rows
 
 
-def summarize(rows: list[dict[str, float | str]], label: str) -> dict[str, float | int | str]:
+def summarize(rows, label):
     if not rows:
         return {
             "source": label,
@@ -130,7 +132,7 @@ def summarize(rows: list[dict[str, float | str]], label: str) -> dict[str, float
     }
 
 
-def to_markdown(summaries: list[dict[str, float | int | str]]) -> str:
+def to_markdown(summaries):
     lines = [
         "| Source | Samples | Avg GPU util % | Max GPU util % | Avg memory GiB | Max memory GiB | Avg memory % | Avg power W | Avg temp C |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -151,8 +153,8 @@ def main() -> None:
     start = read_time_file(args.window_start)
     end = read_time_file(args.window_end)
 
-    by_source: dict[str, list[dict[str, float | str]]] = {}
-    all_rows: list[dict[str, float | str]] = []
+    by_source = {}  # type: Dict[str, List[Dict[str, Any]]]
+    all_rows = []  # type: List[Dict[str, Any]]
     for path in args.csv_files:
         rows = load_rows(path, start, end)
         if not rows:
