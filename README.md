@@ -26,6 +26,7 @@ The focus is throughput for one large dense model, not a broad model leaderboard
 - At `c=128`, `FLASH_ATTN_V100` is `73.6%` faster than stock vLLM (`209.50` vs `120.65 tok/s`).
 - The default container path used NCCL Socket transport for the cross-node `TP=16`, `PP=1` run and reached only `156.12 tok/s`.
 - Staging the minimal RDMA userspace libraries into the container enabled NCCL `NET/IB` and `GDRDMA`, raising the same `TP=16`, `PP=1` case to `351.62 tok/s`.
+- The same IB/GDRDMA path did not improve `TP=8`, `PP=2`; it reached `204.70 tok/s`, essentially matching the previous `209.50 tok/s` result.
 - The `c=128` runs require `GPU_MEMORY_UTILIZATION=0.88`; higher memory utilization left too little headroom for initialization and KV cache.
 
 ## System And Workload
@@ -94,10 +95,12 @@ After staging only the RDMA userspace libraries needed by NCCL into the containe
 
 | Parallelism | NCCL transport | Mode | Aggregate tok/s | Mean latency | Mean TTFT | Mean decode tok/s |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
+| `TP=8`, `PP=2` | default | CUDA graph | 209.50 | 78.09s | 0.80s | 1.64 |
+| `TP=8`, `PP=2` | `NET/IB` + `GDRDMA` | CUDA graph | 204.70 | 80.00s | 0.75s | 1.60 |
 | `TP=16`, `PP=1` | Socket | eager | 156.12 | 104.75s | 1.00s | 1.22 |
 | `TP=16`, `PP=1` | `NET/IB` + `GDRDMA` | eager | 351.62 | 46.48s | 0.56s | 2.77 |
 
-This makes NCCL transport the largest HPC-side optimization in the project: enabling true IB/GDRDMA made the cross-node TP run `2.25x` faster than the same run over Socket transport, and `67.8%` faster than the previous `TP=8`, `PP=2` best.
+This makes NCCL transport the largest HPC-side optimization in the project, but only for the layout that needs heavy cross-node tensor-parallel collectives. Enabling true IB/GDRDMA made the `TP=16`, `PP=1` run `2.25x` faster than the same run over Socket transport. The `TP=8`, `PP=2` run changed from `209.50` to `204.70 tok/s`, so that layout was not bottlenecked by the same interconnect path.
 
 ## Interpretation
 
@@ -105,7 +108,7 @@ Continuous batching is the main throughput lever. On stock vLLM, aggregate throu
 
 The V100 FlashAttention fork matters most at high concurrency. At `c=128`, it increases aggregate throughput by `73.6%` over stock and greatly reduces TTFT. This makes the hardware-oriented optimization visible, not just a parameter tweak.
 
-Parallelism layout depends on the interconnect actually exposed inside the container. With Socket transport, `TP=8`, `PP=2` is better because tensor-parallel collectives stay inside each 8-GPU node. With NCCL `NET/IB` and GDRDMA available, `TP=16`, `PP=1` becomes the fastest configuration because cross-node tensor-parallel collectives are no longer forced through Socket transport.
+Parallelism layout depends on the interconnect actually exposed inside the container. With Socket transport, `TP=8`, `PP=2` is better because tensor-parallel collectives stay inside each 8-GPU node. Adding IB/GDRDMA to `TP=8`, `PP=2` did not help, confirming that this layout was not dominated by cross-node NCCL traffic. With NCCL `NET/IB` and GDRDMA available, `TP=16`, `PP=1` becomes the fastest configuration because cross-node tensor-parallel collectives are no longer forced through Socket transport.
 
 This is the most HPC-specific result in the study. The benchmark did not only tune batch size or vLLM flags; it exposed a container/runtime issue where the job was using an IB network interface but not the NCCL InfiniBand transport. Fixing that transport path improved the final dense-model throughput more than the attention backend alone.
 
