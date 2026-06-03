@@ -22,6 +22,7 @@ The focus is throughput for one large dense model, not a broad model leaderboard
 - The V100 FlashAttention fork reaches `209.50 tok/s` at `c=128`.
 - The best result is `28.82x` higher than the single-request stock baseline.
 - At `c=128`, `FLASH_ATTN_V100` is `73.6%` faster than stock vLLM (`209.50` vs `120.65 tok/s`).
+- A `TP=16`, `PP=1` check reached only `156.12 tok/s`, so `TP=8`, `PP=2` is the better 2-node mapping for this dense model.
 - The `c=128` runs require `GPU_MEMORY_UTILIZATION=0.88`; higher memory utilization left too little headroom for initialization and KV cache.
 
 ## System And Workload
@@ -76,11 +77,22 @@ The `FLASH_ATTN_V100` c=128 result was tuned with the decode partition-size knob
 | 512 | 209.50 | 78.09s | 0.80s | 1.64 |
 | 1024 | 195.11 | 83.91s | 0.98s | 1.53 |
 
+A small parallelism mapping check was run at the same c=128 workload:
+
+| Parallelism | Mode | Aggregate tok/s | Mean latency | Mean TTFT | Mean decode tok/s |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `TP=8`, `PP=2` | CUDA graph | 209.50 | 78.09s | 0.80s | 1.64 |
+| `TP=16`, `PP=1` | eager | 156.12 | 104.75s | 1.00s | 1.22 |
+
+The `TP=16`, `PP=1` run uses eager mode to avoid extra CUDA graph memory at c=128. It is still slower, which supports keeping tensor parallelism inside each 8-GPU node and using pipeline parallelism across the two nodes.
+
 ## Interpretation
 
 Continuous batching is the main throughput lever. On stock vLLM, aggregate throughput increases from `7.27 tok/s` at `c=1` to `120.65 tok/s` at `c=128`, a `16.60x` speedup on the same 16-GPU allocation.
 
 The V100 FlashAttention fork matters most at high concurrency. At `c=128`, it increases aggregate throughput by `73.6%` over stock and greatly reduces TTFT. This makes the hardware-oriented optimization visible, not just a parameter tweak.
+
+Parallelism layout matters as well. `TP=8`, `PP=2` keeps tensor-parallel communication within a node, while `TP=16`, `PP=1` spreads tensor-parallel work across both nodes and drops throughput by about `25.5%` in the successful eager run.
 
 The tradeoff is latency. More simultaneous requests keep the GPUs busier, but each request spends more time waiting behind prefill and batched decoding work. The result is suitable for throughput-oriented offline or batched serving workloads, not low-latency interactive serving.
 
