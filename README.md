@@ -8,14 +8,13 @@ The main result is that the workload improves from `7.27 tok/s` for a single sto
 
 How much can large-model inference throughput improve on older V100 HPC nodes when the optimization is treated as a systems problem?
 
-The study focuses on four levers:
+The study focuses on three systems levers:
 
 - Continuous batching with vLLM.
-- A V100-compatible FlashAttention backend.
-- NCCL transport for cross-node tensor-parallel communication.
-- GPU memory headroom for stable high-concurrency serving.
+- A V100-compatible attention backend.
+- Cross-node topology and NCCL transport.
 
-The goal is not to compare many models. The main workload is one large dense model, measured repeatedly under different serving and communication settings.
+The goal is not to compare many models. The main workload is one large dense model, measured repeatedly under different serving and communication settings. Lightweight GPU profiling is used only to explain the final layout choice.
 
 ## Testbed
 
@@ -60,7 +59,7 @@ At `c=128`, `FLASH_ATTN_V100` is `73.6%` faster than stock vLLM (`209.50` vs `12
 
 For the FlashAttention run, decode partition size `512` was selected because it was the best measured setting. Partition size `256` was nearly identical, while `1024` was slower.
 
-## NCCL Transport
+## Topology And NCCL
 
 The most important HPC result is that the interconnect transport changes which parallelism layout is best.
 
@@ -78,6 +77,19 @@ The interpretation is:
 - After staging the minimal RDMA userspace libraries into the container, NCCL uses `NET/IB` with `GDRDMA`, and the same `TP=16`, `PP=1` layout reaches `351.62 tok/s`.
 
 This makes NCCL transport the main HPC-side optimization. The job was already using an IB network interface, but NCCL was not using the InfiniBand transport until the container could see the required RDMA userspace libraries.
+
+## Profiling Evidence
+
+The profiling reruns sampled `nvidia-smi` once per second during the benchmark window. They are close to the main throughput numbers but are reported separately because profiling adds a small amount of measurement overhead and run-to-run variation.
+
+| Configuration | Aggregate tok/s | Mean latency | Head avg GPU util | Worker avg GPU util | All avg GPU util | Max memory |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `TP=8`, `PP=2`, default NCCL | 209.22 | 78.19s | 63.4% | 91.5% | 77.4% | 31.29 GiB |
+| `TP=16`, `PP=1`, NCCL `NET/IB` + `GDRDMA` | 342.90 | 47.65s | 87.4% | 87.5% | 87.4% | 25.99 GiB |
+
+The `TP=8`, `PP=2` layout keeps tensor parallelism inside each node, but the pipeline stages are not equally busy. The head node averaged only `63.4%` GPU utilization while the worker node averaged `91.5%`.
+
+The `TP=16`, `PP=1` layout removes that pipeline imbalance and makes all 16 GPUs participate in one tensor-parallel group. This layout only works well after NCCL uses `NET/IB` with `GDRDMA`; otherwise cross-node tensor-parallel communication is the bottleneck.
 
 ## Takeaways
 
@@ -149,6 +161,8 @@ The useful output files are:
 
 ```text
 runs/<run-id>/summary.json
+runs/<run-id>/gpu_profile_summary.md
+runs/<run-id>/gpu_profile_summary.json
 runs/<run-id>/experiment.env
 runs/<run-id>/vllm-server.log
 ```
