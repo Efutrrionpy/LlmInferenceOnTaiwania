@@ -39,6 +39,7 @@ EXTRA_VLLM_ARGS="${EXTRA_VLLM_ARGS:-}"
 VLLM_FLASH_V100_DECODE_PARTITION_SIZE="${VLLM_FLASH_V100_DECODE_PARTITION_SIZE:-}"
 VLLM_FLASH_V100_ENABLE_PAGED_PREFILL="${VLLM_FLASH_V100_ENABLE_PAGED_PREFILL:-1}"
 VLLM_FLASH_V100_SMALLQ_DECODE_MAX_Q="${VLLM_FLASH_V100_SMALLQ_DECODE_MAX_Q:-16}"
+GPU_PROFILE_INTERVAL_SECONDS="${GPU_PROFILE_INTERVAL_SECONDS:-0}"
 
 HF_CACHE_ROOT="${HF_CACHE_ROOT:-/work/${USER}/hf-cache-llama31-405b-gptq}"
 export HF_HOME="${HF_HOME:-${HF_CACHE_ROOT}}"
@@ -94,6 +95,7 @@ echo "Max batched tokens: ${MAX_NUM_BATCHED_TOKENS}"
 echo "Flash V100 decode partition size: ${VLLM_FLASH_V100_DECODE_PARTITION_SIZE:-auto}"
 echo "Flash V100 paged prefill: ${VLLM_FLASH_V100_ENABLE_PAGED_PREFILL}"
 echo "Flash V100 small-query decode max Q: ${VLLM_FLASH_V100_SMALLQ_DECODE_MAX_Q}"
+echo "GPU profile interval seconds: ${GPU_PROFILE_INTERVAL_SECONDS}"
 echo "Image: ${IMAGE}"
 echo "Python: ${PYBIN}"
 echo "HF_HOME: ${HF_HOME}"
@@ -122,6 +124,7 @@ VLLM_USE_V1=1
 VLLM_FLASH_V100_DECODE_PARTITION_SIZE=${VLLM_FLASH_V100_DECODE_PARTITION_SIZE}
 VLLM_FLASH_V100_ENABLE_PAGED_PREFILL=${VLLM_FLASH_V100_ENABLE_PAGED_PREFILL}
 VLLM_FLASH_V100_SMALLQ_DECODE_MAX_Q=${VLLM_FLASH_V100_SMALLQ_DECODE_MAX_Q}
+GPU_PROFILE_INTERVAL_SECONDS=${GPU_PROFILE_INTERVAL_SECONDS}
 EOF
 
 run_in_container() {
@@ -143,8 +146,30 @@ export HF_HOME="${HF_HOME}"
 export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE}"
 export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET}"
 export VLLM_HOST_IP="${HEAD_IP}"
+GPU_PROFILE_PID=""
+start_gpu_profile() {
+  local output="\$1"
+  local interval="${GPU_PROFILE_INTERVAL_SECONDS}"
+  if [ -z "\${interval}" ] || [ "\${interval}" = "0" ]; then
+    return 0
+  fi
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo "nvidia-smi not found; skipping GPU profile" >&2
+    return 0
+  fi
+  nvidia-smi --query-gpu=timestamp,index,utilization.gpu,utilization.memory,memory.used,memory.total,power.draw,power.limit,temperature.gpu --format=csv,nounits -l "\${interval}" >"\${output}" 2>"\${output%.csv}.err" &
+  GPU_PROFILE_PID="\$!"
+}
+stop_gpu_profile() {
+  if [ -n "\${GPU_PROFILE_PID}" ]; then
+    kill "\${GPU_PROFILE_PID}" 2>/dev/null || true
+    wait "\${GPU_PROFILE_PID}" 2>/dev/null || true
+  fi
+}
+trap stop_gpu_profile EXIT
 ray stop -f >/dev/null 2>&1 || true
-exec ray start --head \\
+start_gpu_profile "${RUN_DIR}/gpu-profile-head.csv"
+ray start --head \\
   --node-ip-address="${HEAD_IP}" \\
   --port="${RAY_PORT}" \\
   --num-cpus="${SLURM_CPUS_PER_TASK}" \\
@@ -163,8 +188,30 @@ export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE}"
 export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET}"
 WORKER_IP="\$(hostname -I | awk '{print \$1}')"
 export VLLM_HOST_IP="\${WORKER_IP}"
+GPU_PROFILE_PID=""
+start_gpu_profile() {
+  local output="\$1"
+  local interval="${GPU_PROFILE_INTERVAL_SECONDS}"
+  if [ -z "\${interval}" ] || [ "\${interval}" = "0" ]; then
+    return 0
+  fi
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo "nvidia-smi not found; skipping GPU profile" >&2
+    return 0
+  fi
+  nvidia-smi --query-gpu=timestamp,index,utilization.gpu,utilization.memory,memory.used,memory.total,power.draw,power.limit,temperature.gpu --format=csv,nounits -l "\${interval}" >"\${output}" 2>"\${output%.csv}.err" &
+  GPU_PROFILE_PID="\$!"
+}
+stop_gpu_profile() {
+  if [ -n "\${GPU_PROFILE_PID}" ]; then
+    kill "\${GPU_PROFILE_PID}" 2>/dev/null || true
+    wait "\${GPU_PROFILE_PID}" 2>/dev/null || true
+  fi
+}
+trap stop_gpu_profile EXIT
 ray stop -f >/dev/null 2>&1 || true
-exec ray start --address="${RAY_ADDRESS}" \\
+start_gpu_profile "${RUN_DIR}/gpu-profile-worker.csv"
+ray start --address="${RAY_ADDRESS}" \\
   --node-ip-address="\${WORKER_IP}" \\
   --num-cpus="${SLURM_CPUS_PER_TASK}" \\
   --num-gpus="${GPUS_PER_NODE}" \\
@@ -312,6 +359,7 @@ run_benchmark_level() {
 
   echo "Running benchmark: concurrency=${concurrency}, runs=${runs}"
   set +e
+  date '+%Y/%m/%d %H:%M:%S' >"${result_dir}/profile_window_start.txt"
   run_in_container "cd '${PROJECT_DIR}' && '${PYBIN}' scripts/benchmark_openai_completion.py \
     --base-url 'http://127.0.0.1:${VLLM_PORT}/v1' \
     --model '${SERVED_MODEL_NAME}' \
@@ -325,6 +373,7 @@ run_benchmark_level() {
     --server-timeout 60 \
     --request-timeout 1200" >"${result_dir}/benchmark.log" 2>&1
   local status="$?"
+  date '+%Y/%m/%d %H:%M:%S' >"${result_dir}/profile_window_end.txt"
   set -e
   cat "${result_dir}/benchmark.log"
   echo "${status}" >"${result_dir}/exit_code"
@@ -372,6 +421,29 @@ for row in rows:
 PY
 }
 
+write_gpu_profile_summary() {
+  if [ -z "${GPU_PROFILE_INTERVAL_SECONDS}" ] || [ "${GPU_PROFILE_INTERVAL_SECONDS}" = "0" ]; then
+    return 0
+  fi
+
+  local last_concurrency=""
+  for concurrency in ${CONCURRENCY_LEVELS}; do
+    last_concurrency="${concurrency}"
+  done
+
+  local window_start="${RUN_DIR}/c${last_concurrency}/profile_window_start.txt"
+  local window_end="${RUN_DIR}/c${last_concurrency}/profile_window_end.txt"
+  python scripts/summarize_gpu_profile.py \
+    --window-start "${window_start}" \
+    --window-end "${window_end}" \
+    --output-json "${RUN_DIR}/gpu_profile_summary.json" \
+    --output-md "${RUN_DIR}/gpu_profile_summary.md" \
+    "${RUN_DIR}"/gpu-profile-*.csv || true
+  if [ -f "${RUN_DIR}/gpu_profile_summary.md" ]; then
+    cat "${RUN_DIR}/gpu_profile_summary.md"
+  fi
+}
+
 write_runtime_scripts
 start_ray_head
 sleep 10
@@ -386,5 +458,6 @@ done
 
 grep -E "FLASH_ATTN_V100|attention backend|fallback|path active|CUDA|GPU|quant|KV cache" "${RUN_DIR}/vllm-server.log" >"${RUN_DIR}/backend-markers.log" 2>/dev/null || true
 write_sweep_summary | tee "${RUN_DIR}/sweep_summary.md"
+write_gpu_profile_summary
 
 echo "1Cat 405B sweep finished. Summary: ${RUN_DIR}/sweep_summary.json"
