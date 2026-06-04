@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="360" viewBox="0 0 900 360" role="img" aria-labelledby="title desc">
+  <title id="title">Optimization path throughput</title>
+  <desc id="desc">Bar chart showing aggregate output throughput from the single-request baseline to the highest measured high-concurrency run.</desc>
+  <style>
+    text { font-family: Arial, sans-serif; fill: #111827; font-size: 14px; }
+    .title { font-size: 20px; font-weight: 700; }
+    .subtitle { fill: #4b5563; font-size: 13px; }
+    .label { font-size: 13px; }
+    .value { font-size: 13px; font-weight: 700; }
+    .axis { stroke: #d1d5db; stroke-width: 1; }
+    .grid { stroke: #e5e7eb; stroke-width: 1; }
+  </style>
+  <rect width="900" height="360" fill="#ffffff"/>
+  <text x="30" y="34" class="title">Optimization path</text>
+  <text x="30" y="56" class="subtitle">Aggregate generated output throughput, 512 target input tokens and 128 output tokens</text>
+
+  <line x1="290" y1="292" x2="810" y2="292" class="axis"/>
+  <line x1="290" y1="78" x2="290" y2="292" class="axis"/>
+  <line x1="450" y1="78" x2="450" y2="292" class="grid"/>
+  <line x1="610" y1="78" x2="610" y2="292" class="grid"/>
+  <line x1="770" y1="78" x2="770" y2="292" class="grid"/>
+  <text x="286" y="315" class="subtitle">0</text>
+  <text x="430" y="315" class="subtitle">200</text>
+  <text x="590" y="315" class="subtitle">400</text>
+  <text x="750" y="315" class="subtitle">600 tok/s</text>
+
+  <text x="30" y="96" class="label">Single request baseline</text>
+  <rect x="290" y="78" width="6" height="24" rx="3" fill="#94a3b8"/>
+  <text x="306" y="96" class="value">7.27</text>
+
+  <text x="30" y="136" class="label">Continuous batching</text>
+  <rect x="290" y="118" width="96" height="24" rx="3" fill="#60a5fa"/>
+  <text x="396" y="136" class="value">120.65</text>
+
+  <text x="30" y="176" class="label">V100 FlashAttention</text>
+  <rect x="290" y="158" width="168" height="24" rx="3" fill="#2563eb"/>
+  <text x="468" y="176" class="value">209.50</text>
+
+  <text x="30" y="216" class="label">Cross-node TP, Socket</text>
+  <rect x="290" y="198" width="125" height="24" rx="3" fill="#ef4444"/>
+  <text x="425" y="216" class="value">156.12</text>
+
+  <text x="30" y="256" class="label">Cross-node TP, IB/GDRDMA</text>
+  <rect x="290" y="238" width="281" height="24" rx="3" fill="#0f766e"/>
+  <text x="581" y="256" class="value">351.62</text>
+
+  <text x="30" y="296" class="label">High concurrency, c=768</text>
+  <rect x="290" y="278" width="520" height="24" rx="3" fill="#7c3aed"/>
+  <text x="820" y="296" class="value">650.33</text>
+</svg>

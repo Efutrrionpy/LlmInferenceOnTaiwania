@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="420" viewBox="0 0 900 420" role="img" aria-labelledby="title desc">
+  <title id="title">Continuous batching and attention backend throughput</title>
+  <desc id="desc">Line chart comparing stock XFormers and FLASH_ATTN_V100 throughput from concurrency 1 to 128.</desc>
+  <style>
+    text { font-family: Arial, sans-serif; fill: #111827; font-size: 13px; }
+    .title { font-size: 20px; font-weight: 700; }
+    .subtitle { fill: #4b5563; font-size: 13px; }
+    .axis { stroke: #d1d5db; stroke-width: 1; }
+    .grid { stroke: #e5e7eb; stroke-width: 1; }
+    .stock { stroke: #64748b; stroke-width: 3; fill: none; }
+    .flash { stroke: #2563eb; stroke-width: 3; fill: none; }
+    .dot-stock { fill: #64748b; }
+    .dot-flash { fill: #2563eb; }
+  </style>
+  <rect width="900" height="420" fill="#ffffff"/>
+  <text x="30" y="34" class="title">Continuous batching and attention backend</text>
+  <text x="30" y="56" class="subtitle">Batching exposes enough work for the V100-compatible FlashAttention backend to matter.</text>
+
+  <line x1="70" y1="310" x2="790" y2="310" class="axis"/>
+  <line x1="70" y1="60" x2="70" y2="310" class="axis"/>
+  <line x1="70" y1="253" x2="790" y2="253" class="grid"/>
+  <line x1="70" y1="196" x2="790" y2="196" class="grid"/>
+  <line x1="70" y1="139" x2="790" y2="139" class="grid"/>
+  <line x1="70" y1="82" x2="790" y2="82" class="grid"/>
+  <text x="36" y="314">0</text>
+  <text x="28" y="257">50</text>
+  <text x="22" y="200">100</text>
+  <text x="22" y="143">150</text>
+  <text x="22" y="86">200</text>
+  <text x="338" y="392">Concurrency</text>
+  <text x="16" y="52">tok/s</text>
+
+  <polyline class="stock" points="70,302 173,295 276,282 379,261 482,237 585,219 688,192 790,173"/>
+  <polyline class="flash" points="70,302 173,294 276,281 379,261 482,245 585,215 688,166 790,72"/>
+
+  <circle cx="70" cy="302" r="4" class="dot-stock"/><circle cx="173" cy="295" r="4" class="dot-stock"/><circle cx="276" cy="282" r="4" class="dot-stock"/><circle cx="379" cy="261" r="4" class="dot-stock"/><circle cx="482" cy="237" r="4" class="dot-stock"/><circle cx="585" cy="219" r="4" class="dot-stock"/><circle cx="688" cy="192" r="4" class="dot-stock"/><circle cx="790" cy="173" r="4" class="dot-stock"/>
+  <circle cx="70" cy="302" r="4" class="dot-flash"/><circle cx="173" cy="294" r="4" class="dot-flash"/><circle cx="276" cy="281" r="4" class="dot-flash"/><circle cx="379" cy="261" r="4" class="dot-flash"/><circle cx="482" cy="245" r="4" class="dot-flash"/><circle cx="585" cy="215" r="4" class="dot-flash"/><circle cx="688" cy="166" r="4" class="dot-flash"/><circle cx="790" cy="72" r="4" class="dot-flash"/>
+
+  <text x="62" y="334">1</text>
+  <text x="165" y="334">2</text>
+  <text x="268" y="334">4</text>
+  <text x="371" y="334">8</text>
+  <text x="474" y="334">16</text>
+  <text x="577" y="334">32</text>
+  <text x="680" y="334">64</text>
+  <text x="778" y="334">128</text>
+
+  <rect x="575" y="28" width="18" height="4" fill="#64748b"/>
+  <text x="602" y="34">XFormers / stock</text>
+  <rect x="575" y="50" width="18" height="4" fill="#2563eb"/>
+  <text x="602" y="56">FLASH_ATTN_V100</text>
+  <text x="710" y="90" fill="#2563eb" font-weight="700">209.50</text>
+  <text x="715" y="166" fill="#64748b" font-weight="700">120.65</text>
+</svg>

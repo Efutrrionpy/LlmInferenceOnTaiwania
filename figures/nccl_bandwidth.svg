@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="420" viewBox="0 0 900 420" role="img" aria-labelledby="title desc">
+  <title id="title">NCCL all-reduce bandwidth</title>
+  <desc id="desc">Grouped bar chart comparing Socket and NCCL IB/GDRDMA bus bandwidth for several all-reduce message sizes.</desc>
+  <style>
+    text { font-family: Arial, sans-serif; fill: #111827; font-size: 13px; }
+    .title { font-size: 20px; font-weight: 700; }
+    .subtitle { fill: #4b5563; font-size: 13px; }
+    .axis { stroke: #d1d5db; stroke-width: 1; }
+    .grid { stroke: #e5e7eb; stroke-width: 1; }
+  </style>
+  <rect width="900" height="420" fill="#ffffff"/>
+  <text x="30" y="34" class="title">Cross-node all-reduce bandwidth</text>
+  <text x="30" y="56" class="subtitle">NCCL IB/GDRDMA changes the viability of cross-node tensor parallelism.</text>
+
+  <line x1="80" y1="320" x2="790" y2="320" class="axis"/>
+  <line x1="80" y1="70" x2="80" y2="320" class="axis"/>
+  <line x1="80" y1="237" x2="790" y2="237" class="grid"/>
+  <line x1="80" y1="153" x2="790" y2="153" class="grid"/>
+  <line x1="80" y1="70" x2="790" y2="70" class="grid"/>
+  <text x="47" y="324">0</text>
+  <text x="37" y="241">20</text>
+  <text x="37" y="157">40</text>
+  <text x="37" y="74">60</text>
+  <text x="14" y="58">GB/s</text>
+
+  <rect x="140" y="310" width="32" height="10" rx="3" fill="#ef4444"/>
+  <rect x="176" y="247" width="32" height="73" rx="3" fill="#0f766e"/>
+  <text x="145" y="344">1 MiB</text>
+
+  <rect x="310" y="296" width="32" height="24" rx="3" fill="#ef4444"/>
+  <rect x="346" y="137" width="32" height="183" rx="3" fill="#0f766e"/>
+  <text x="311" y="344">16 MiB</text>
+
+  <rect x="480" y="293" width="32" height="27" rx="3" fill="#ef4444"/>
+  <rect x="516" y="106" width="32" height="214" rx="3" fill="#0f766e"/>
+  <text x="481" y="344">64 MiB</text>
+
+  <rect x="650" y="294" width="32" height="26" rx="3" fill="#ef4444"/>
+  <rect x="686" y="74" width="32" height="246" rx="3" fill="#0f766e"/>
+  <text x="647" y="344">256 MiB</text>
+
+  <rect x="575" y="28" width="18" height="12" rx="2" fill="#ef4444"/>
+  <text x="602" y="39">Socket</text>
+  <rect x="575" y="50" width="18" height="12" rx="2" fill="#0f766e"/>
+  <text x="602" y="61">NCCL IB/GDRDMA</text>
+  <text x="696" y="68" font-weight="700">59.16</text>
+</svg>

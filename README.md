@@ -14,6 +14,27 @@ The three systems levers are:
 - V100-compatible attention kernels.
 - Cross-node parallelism with the correct NCCL transport.
 
+## External Benchmark Context
+
+Public LLM inference benchmarks usually frame the problem as a throughput and latency tradeoff under a defined workload, not only as a model-loading exercise. MLPerf Inference includes `llama3.1-405b` as a datacenter workload and documents both Offline and Server scenarios for Llama 3.1 405B. NVIDIA TensorRT-LLM reports maximum-load throughput as `Total Output Throughput (tokens/sec)` and publishes Llama 3.1 405B FP8 results on newer H100/H200 GPUs.
+
+This project uses those benchmarks as context rather than as a direct ranking target. The hardware, precision, runtime, and prompt lengths are different. The comparison is used to shape the story: can an older V100 HPC allocation reproduce the same systems-oriented way of thinking under a one-hour Slurm limit?
+
+| External reference | What it contributes | Why it is not a direct comparison |
+| --- | --- | --- |
+| [MLPerf Inference Llama 3.1 405B](https://docs.mlcommons.org/inference/benchmarks/language/llama3_1-405b/) | Offline and Server benchmark framing for a 405B-class LLM | Different benchmark harness, dataset, compliance rules, and hardware assumptions |
+| [MLCommons inference repository](https://github.com/mlcommons/inference) | Lists `llama3.1-405b` as a datacenter inference workload | MLPerf submissions are standardized workloads, while this project is a constrained HPC course experiment |
+| [TensorRT-LLM performance overview](https://nvidia.github.io/TensorRT-LLM/performance/perf-overview.html) | Published maximum-load output throughput for Llama 3.1 405B on H100/H200 | Newer GPUs, FP8, TensorRT-LLM, and different input/output lengths |
+| [NVIDIA Tesla V100](https://www.nvidia.com/en-gb/data-center/tesla-v100/) | V100 tensor-core peak performance used for the efficiency estimate | Peak FLOP/s is only an upper bound, not an inference throughput prediction |
+
+One useful public scale point is TensorRT-LLM's `2048/128` Llama 3.1 405B FP8 row. Its benchmark reports maximum-load `Total Output Throughput (tokens/sec)`. The numbers below should be read as context for workload scale, not as a claim that the V100 result is faster than modern GPUs.
+
+| Source | Hardware | Runtime / precision | Input / output | Output tok/s | Note |
+| --- | --- | --- | ---: | ---: | --- |
+| TensorRT-LLM public table | 8 x H100 SXM 80GB | TensorRT-LLM / FP8 | 2048 / 128 | 433.47 | Longer prefill and newer GPUs |
+| TensorRT-LLM public table | 8 x H200 SXM 141GB | TensorRT-LLM / FP8 | 2048 / 128 | 441.35 | Longer prefill and newer GPUs |
+| This project | 16 x V100-SXM2-32GB | vLLM / GPTQ INT4 | 512 / 128 | 650.33 | Shorter prefill, more GPUs, older hardware |
+
 ## Testbed
 
 | Item | Setting |
@@ -44,6 +65,8 @@ The main comparison is controlled at `c=128` after the single-request baseline. 
 | Cross-node TP with IB/GDRDMA | `FLASH_ATTN_V100` + NCCL `NET/IB` | `TP=16`, `PP=1` | 128 | 351.62 | 48.37x |
 | Higher-concurrency run | `FLASH_ATTN_V100` + NCCL `NET/IB` | `TP=16`, `PP=1` | 768 | 650.33 | 89.45x |
 
+![Optimization path from baseline to high-concurrency throughput](figures/optimization_path.svg)
+
 The important point is that `TP=16`, `PP=1` is only good after NCCL uses InfiniBand transport. With Socket transport, cross-node tensor parallelism is slower than the simpler `TP=8`, `PP=2` layout. With `NET/IB` and GDRDMA, it becomes the best layout.
 
 ## Continuous Batching And Attention
@@ -54,6 +77,8 @@ The first part of the study asks how far serving-level batching and attention ke
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | XFormers / stock | 7.27 | 13.25 | 24.65 | 42.77 | 64.36 | 79.91 | 103.75 | 120.65 | 120.65 |
 | `FLASH_ATTN_V100` | 7.12 | 13.70 | 25.66 | 43.39 | 57.42 | 83.73 | 126.67 | 209.50 | 209.50 |
+
+![Continuous batching comparison between stock XFormers and FLASH_ATTN_V100](figures/batching_attention.svg)
 
 At `c=128`, `FLASH_ATTN_V100` is `73.6%` faster than stock vLLM (`209.50` vs `120.65 tok/s`). This is the first major result: batching creates enough parallel work for the attention backend to matter.
 
@@ -84,6 +109,8 @@ A two-node PyTorch/NCCL all-reduce microbenchmark was also used to confirm that 
 | 64 MiB | 6.39 GB/s | 51.46 GB/s | 8.06x |
 | 256 MiB | 6.24 GB/s | 59.16 GB/s | 9.48x |
 
+![All-reduce bandwidth comparison between Socket and NCCL IB/GDRDMA](figures/nccl_bandwidth.svg)
+
 This supports the LLM result: the best layout depends on real NCCL InfiniBand transport, not only on selecting a network interface.
 
 ## GPU Profiling
@@ -99,11 +126,34 @@ The profiling reruns sampled `nvidia-smi` once per second during the benchmark w
 | `TP=16`, `PP=1`, NCCL `NET/IB` + `GDRDMA` | 640 | 637.37 | 128.12s | 93.8% | 93.1% | 93.5% | 30.03 GiB |
 | `TP=16`, `PP=1`, NCCL `NET/IB` + `GDRDMA` | 768 | 650.33 | 150.69s | 94.5% | 94.5% | 94.5% | 30.32 GiB |
 
+![Throughput and GPU utilization as concurrency increases](figures/gpu_saturation.svg)
+
 The `TP=8`, `PP=2` layout keeps tensor parallelism local to each node, but the pipeline stages are not equally busy. The head node averaged only `63.4%` GPU utilization while the worker node averaged `91.5%`.
 
 The `TP=16`, `PP=1` layout removes that pipeline imbalance and makes all 16 GPUs participate in one tensor-parallel group. That is why the GPU utilization becomes much more balanced once NCCL transport is fixed.
 
 The high-concurrency sweep shows that `c=768` is close to practical saturation for this workload: GPU utilization reaches `94.5%`, memory use reaches `30.32 GiB`, and further concurrency would mainly trade latency for limited additional throughput.
+
+## Hardware Efficiency Estimate
+
+To give the throughput numbers a hardware scale, the report estimates a simple model FLOP utilization (MFU). This is not a profiler-derived hardware FLOP counter. It is a roofline-style estimate using dense-model decode cost and the published V100 tensor-core peak.
+
+```text
+FLOPs/token ~= 2 x model parameters
+Useful model TFLOP/s = aggregate tok/s x 2 x 405B / 1e12
+Estimated MFU = useful model TFLOP/s / (16 x 125 TFLOP/s)
+```
+
+| Configuration | Aggregate tok/s | Useful model TFLOP/s | Estimated MFU | GPU util |
+| --- | ---: | ---: | ---: | ---: |
+| `TP=16`, `PP=1`, IB/GDRDMA, c=128 | 351.62 | 284.8 | 14.2% | 87.4% |
+| `TP=16`, `PP=1`, IB/GDRDMA, c=512 | 595.89 | 482.7 | 24.1% | 93.5% |
+| `TP=16`, `PP=1`, IB/GDRDMA, c=640 | 637.37 | 516.3 | 25.8% | 93.5% |
+| `TP=16`, `PP=1`, IB/GDRDMA, c=768 | 650.33 | 526.8 | 26.3% | 94.5% |
+
+![Estimated MFU for the optimized tensor-parallel runs](figures/mfu_estimate.svg)
+
+The highest run reaches `650.33 tok/s`, which corresponds to about `526.8 TFLOP/s` of useful dense-model work. Against a simple `16 x 125 TFLOP/s = 2.0 PFLOP/s` V100 tensor-core roof, this is about `26.3%` estimated MFU. The gap between `94.5%` GPU utilization and `26.3%` MFU is the main systems interpretation: the GPUs are busy, but not all busy time is ideal dense matrix compute.
 
 ## Interpretation
 
