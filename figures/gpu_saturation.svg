@@ -31,32 +31,29 @@
   <text x="802" y="128">86%</text>
   <text x="802" y="94">100%</text>
 
-  <rect x="92" y="212" width="70" height="118" rx="4" fill="#2563eb"/>
-  <rect x="242" y="205" width="70" height="125" rx="4" fill="#2563eb"/>
-  <rect x="392" y="126" width="70" height="204" rx="4" fill="#2563eb"/>
-  <rect x="542" y="112" width="70" height="218" rx="4" fill="#2563eb"/>
-  <rect x="692" y="107" width="70" height="223" rx="4" fill="#2563eb"/>
+  <rect x="120" y="212" width="70" height="118" rx="4" fill="#2563eb"/>
+  <rect x="300" y="126" width="70" height="204" rx="4" fill="#2563eb"/>
+  <rect x="480" y="112" width="70" height="218" rx="4" fill="#2563eb"/>
+  <rect x="660" y="107" width="70" height="223" rx="4" fill="#2563eb"/>
 
-  <polyline class="util" points="127,120 277,115 427,106 577,106 727,103"/>
-  <circle cx="127" cy="120" r="5" fill="#f97316"/>
-  <circle cx="277" cy="115" r="5" fill="#f97316"/>
-  <circle cx="427" cy="106" r="5" fill="#f97316"/>
-  <circle cx="577" cy="106" r="5" fill="#f97316"/>
-  <circle cx="727" cy="103" r="5" fill="#f97316"/>
+  <polyline class="util" points="155,120 335,106 515,106 695,103"/>
+  <circle cx="155" cy="120" r="5" fill="#f97316"/>
+  <circle cx="335" cy="106" r="5" fill="#f97316"/>
+  <circle cx="515" cy="106" r="5" fill="#f97316"/>
+  <circle cx="695" cy="103" r="5" fill="#f97316"/>
 
-  <text x="105" y="354">c=128</text>
-  <text x="255" y="354">c=160</text>
-  <text x="405" y="354">c=512</text>
-  <text x="555" y="354">c=640</text>
-  <text x="705" y="354">c=768</text>
-  <text x="102" y="202" fill="#ffffff" font-weight="700">342.9</text>
-  <text x="402" y="116" fill="#ffffff" font-weight="700">595.9</text>
-  <text x="552" y="102" fill="#ffffff" font-weight="700">637.4</text>
-  <text x="702" y="97" fill="#ffffff" font-weight="700">650.3</text>
+  <text x="133" y="354">c=128</text>
+  <text x="313" y="354">c=512</text>
+  <text x="493" y="354">c=640</text>
+  <text x="673" y="354">c=768</text>
+  <text x="130" y="202" fill="#ffffff" font-weight="700">342.9</text>
+  <text x="310" y="116" fill="#ffffff" font-weight="700">595.9</text>
+  <text x="490" y="102" fill="#ffffff" font-weight="700">637.4</text>
+  <text x="670" y="97" fill="#ffffff" font-weight="700">650.3</text>
 
   <rect x="540" y="28" width="18" height="12" rx="2" fill="#2563eb"/>
   <text x="566" y="39">Aggregate tok/s</text>
   <line x1="540" y1="56" x2="558" y2="56" stroke="#f97316" stroke-width="3"/>
   <text x="566" y="61">All-GPU average utilization</text>
-  <text x="742" y="100" fill="#f97316" font-weight="700">94.5%</text>
+  <text x="710" y="100" fill="#f97316" font-weight="700">94.5%</text>
 </svg>

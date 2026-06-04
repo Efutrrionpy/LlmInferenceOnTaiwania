@@ -121,7 +121,6 @@ The profiling reruns sampled `nvidia-smi` once per second during the benchmark w
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `TP=8`, `PP=2`, default NCCL | 128 | 209.22 | 78.19s | 63.4% | 91.5% | 77.4% | 31.29 GiB |
 | `TP=16`, `PP=1`, NCCL `NET/IB` + `GDRDMA` | 128 | 342.90 | 47.65s | 87.4% | 87.5% | 87.4% | 25.99 GiB |
-| `TP=16`, `PP=1`, NCCL `NET/IB` + `GDRDMA` | 160 | 364.77 | 56.01s | 89.6% | 89.3% | 89.5% | 26.22 GiB |
 | `TP=16`, `PP=1`, NCCL `NET/IB` + `GDRDMA` | 512 | 595.89 | 109.62s | 93.7% | 93.3% | 93.5% | 29.49 GiB |
 | `TP=16`, `PP=1`, NCCL `NET/IB` + `GDRDMA` | 640 | 637.37 | 128.12s | 93.8% | 93.1% | 93.5% | 30.03 GiB |
 | `TP=16`, `PP=1`, NCCL `NET/IB` + `GDRDMA` | 768 | 650.33 | 150.69s | 94.5% | 94.5% | 94.5% | 30.32 GiB |
