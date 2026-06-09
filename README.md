@@ -78,7 +78,7 @@ The first part of the study asks how far serving-level batching and attention ke
 | XFormers / stock | 7.27 | 13.25 | 24.65 | 42.77 | 64.36 | 79.91 | 103.75 | 120.65 | 124.30 | 123.92 | 124.30 |
 | `FLASH_ATTN_V100` | 7.12 | 13.70 | 25.66 | 43.39 | 57.42 | 83.73 | 126.67 | 209.50 | 300.48 | 380.04 | 380.04 |
 
-![Continuous batching comparison between stock XFormers and FLASH_ATTN_V100](figures/batching_attention.svg)
+![Continuous batching comparison between stock XFormers and FLASH_ATTN_V100](figures/batching_attention_extended.svg)
 
 At `c=128`, `FLASH_ATTN_V100` is `73.6%` faster than stock vLLM (`209.50` vs `120.65 tok/s`). This is the first major result: batching creates enough parallel work for the attention backend to matter.
 
