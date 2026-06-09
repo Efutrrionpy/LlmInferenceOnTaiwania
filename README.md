@@ -73,14 +73,16 @@ The important point is that `TP=16`, `PP=1` is only good after NCCL uses InfiniB
 
 The first part of the study asks how far serving-level batching and attention kernels can go before changing the cross-node layout.
 
-| Backend | c=1 | c=2 | c=4 | c=8 | c=16 | c=32 | c=64 | c=128 | Highest |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| XFormers / stock | 7.27 | 13.25 | 24.65 | 42.77 | 64.36 | 79.91 | 103.75 | 120.65 | 120.65 |
-| `FLASH_ATTN_V100` | 7.12 | 13.70 | 25.66 | 43.39 | 57.42 | 83.73 | 126.67 | 209.50 | 209.50 |
+| Backend | c=1 | c=2 | c=4 | c=8 | c=16 | c=32 | c=64 | c=128 | c=256 | c=512 | Highest |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| XFormers / stock | 7.27 | 13.25 | 24.65 | 42.77 | 64.36 | 79.91 | 103.75 | 120.65 | 124.30 | 123.92 | 124.30 |
+| `FLASH_ATTN_V100` | 7.12 | 13.70 | 25.66 | 43.39 | 57.42 | 83.73 | 126.67 | 209.50 | 300.48 | 380.04 | 380.04 |
 
 ![Continuous batching comparison between stock XFormers and FLASH_ATTN_V100](figures/batching_attention.svg)
 
 At `c=128`, `FLASH_ATTN_V100` is `73.6%` faster than stock vLLM (`209.50` vs `120.65 tok/s`). This is the first major result: batching creates enough parallel work for the attention backend to matter.
+
+The `c=256` and `c=512` extension used eager execution because the larger high-concurrency run does not leave enough headroom for CUDA graph capture on 32GB V100 GPUs. These points are useful as throughput saturation measurements, but the cleaner backend comparison is still the `c=128` row. At `c=512`, `FLASH_ATTN_V100` reaches `380.04 tok/s`, while stock XFormers stays flat at `123.92 tok/s` with much higher latency.
 
 The high-concurrency FlashAttention runs used `GPU_MEMORY_UTILIZATION=0.88`. Decode partition size `512` was selected because it was the best measured setting; `256` was nearly identical and `1024` was slower.
 
