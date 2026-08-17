@@ -2,11 +2,7 @@
 
 This project studies throughput-oriented inference for one large dense model on a fixed HPC allocation: 2 nodes, 16 NVIDIA V100 GPUs, and one hour per Slurm job.
 
-The headline result, stated as a controlled comparison at fixed request pressure (`c=128`):
-
-> **`120.65 -> 351.62 tok/s`, a `2.91x` gain over stock vLLM at the same concurrency**, from a V100-compatible FlashAttention backend plus cross-node tensor parallelism over NCCL InfiniBand/GDRDMA.
-
-Separately, moving from one in-flight request to `c=128` on stock vLLM takes `7.27 -> 120.65 tok/s`. The highest measured throughput was `650.33 tok/s` at `c=768`.
+At a fixed `c=128`, a V100-compatible FlashAttention backend plus cross-node tensor parallelism over NCCL InfiniBand/GDRDMA takes throughput from `120.65` to `351.62 tok/s`, a `2.91x` gain over stock vLLM at the same concurrency. Getting stock vLLM from one in-flight request to `c=128` is a separate `7.27 -> 120.65 tok/s`. The highest measured throughput was `650.33 tok/s` at `c=768`.
 
 The experiment uses one main workload rather than comparing many models. The question is:
 
@@ -17,17 +13,6 @@ The three systems levers are:
 - Continuous batching.
 - V100-compatible attention kernels.
 - Cross-node parallelism with the correct NCCL transport.
-
-### How to read the speedup numbers
-
-Dividing any batched result by the single-request baseline produces a large multiplier (`650.33 / 7.27 = 89x`), but that number is not an engineering result. A single request leaves 16 GPUs almost entirely idle, so most of that ratio is just the workload changing from `c=1` to `c=768`. Per-request throughput actually *falls* as concurrency rises: `7.27 tok/s` for one request becomes `0.85 tok/s` per request at `c=768`.
-
-This README therefore reports two different things and keeps them apart:
-
-- **Batching gain** — a workload-level effect, measured by sweeping concurrency on a fixed configuration.
-- **Systems gain** — the engineering result, measured at fixed `c=128` while changing one lever at a time.
-
-Whenever a ratio against `c=1` appears, it is labelled as such.
 
 ## External Benchmark Context
 
@@ -50,7 +35,7 @@ One useful public scale point is TensorRT-LLM's `2048/128` Llama 3.1 405B FP8 ro
 | TensorRT-LLM public table | 8 x H200 SXM 141GB | TensorRT-LLM / FP8 | 2048 / 128 | 441.35 | 55.17 |
 | This project | 16 x V100-SXM2-32GB | vLLM / GPTQ INT4 | 512 / 128 | 650.33 | 40.65 |
 
-The aggregate column favours this project for two reasons that have nothing to do with the optimization work: it uses twice as many GPUs, and its prefill is a quarter the length. Normalizing per GPU already flips the ordering, and the H100/H200 rows still carry the longer prefill. The honest reading is that a Volta-era allocation lands in the same order of magnitude on this workload, not that it beats an H100.
+The aggregate column favours this project for reasons unrelated to the optimization work: twice as many GPUs, and a quarter of the prefill length. Per GPU the ordering already flips, and the H100/H200 rows still carry the longer prefill. The takeaway is that a Volta-era allocation lands in the same order of magnitude on this workload, not that it beats an H100.
 
 ## Testbed
 
@@ -82,7 +67,7 @@ The main comparison is controlled at `c=128` after the single-request baseline. 
 | Cross-node TP with IB/GDRDMA | `FLASH_ATTN_V100` + NCCL `NET/IB` | `TP=16`, `PP=1` | 128 | **351.62** | **2.91x** | 48.37x |
 | Higher-concurrency run | `FLASH_ATTN_V100` + NCCL `NET/IB` | `TP=16`, `PP=1` | 768 | 650.33 | not controlled | 89.45x |
 
-The **`vs stock @ c=128`** column is the result of this project: same request pressure, same allocation, roughly one lever changed per row (the `TP=16` rows also switch to eager execution — see [Limitations](#limitations)). The **`vs c=1`** column is included only for continuity with the baseline row and mostly measures concurrency, not engineering — see [How to read the speedup numbers](#how-to-read-the-speedup-numbers). The last row changes concurrency as well as configuration, so it has no controlled ratio.
+`vs stock @ c=128` is the controlled comparison: same request pressure, same allocation. `vs c=1` is included for continuity with the baseline row, but it mostly tracks concurrency — a single request leaves 16 GPUs idle, so per-request throughput falls from `7.27` to `0.85 tok/s` even as the aggregate rises.
 
 ![Optimization path from baseline to high-concurrency throughput](figures/optimization_path.svg)
 
