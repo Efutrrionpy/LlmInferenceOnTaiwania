@@ -2,7 +2,11 @@
 
 This project studies throughput-oriented inference for one large dense model on a fixed HPC allocation: 2 nodes, 16 NVIDIA V100 GPUs, and one hour per Slurm job.
 
-Using the same allocation, throughput improved from `7.27 tok/s` for one stock vLLM request to `351.62 tok/s` at `c=128` after batching, a V100-compatible FlashAttention backend, and NCCL InfiniBand/GDRDMA transport. The highest measured throughput was `650.33 tok/s` at `c=768`.
+The headline result, stated as a controlled comparison at fixed request pressure (`c=128`):
+
+> **`120.65 -> 351.62 tok/s`, a `2.91x` gain over stock vLLM at the same concurrency**, from a V100-compatible FlashAttention backend plus cross-node tensor parallelism over NCCL InfiniBand/GDRDMA.
+
+Separately, moving from one in-flight request to `c=128` on stock vLLM takes `7.27 -> 120.65 tok/s`. The highest measured throughput was `650.33 tok/s` at `c=768`.
 
 The experiment uses one main workload rather than comparing many models. The question is:
 
@@ -13,6 +17,17 @@ The three systems levers are:
 - Continuous batching.
 - V100-compatible attention kernels.
 - Cross-node parallelism with the correct NCCL transport.
+
+### How to read the speedup numbers
+
+Dividing any batched result by the single-request baseline produces a large multiplier (`650.33 / 7.27 = 89x`), but that number is not an engineering result. A single request leaves 16 GPUs almost entirely idle, so most of that ratio is just the workload changing from `c=1` to `c=768`. Per-request throughput actually *falls* as concurrency rises: `7.27 tok/s` for one request becomes `0.85 tok/s` per request at `c=768`.
+
+This README therefore reports two different things and keeps them apart:
+
+- **Batching gain** — a workload-level effect, measured by sweeping concurrency on a fixed configuration.
+- **Systems gain** — the engineering result, measured at fixed `c=128` while changing one lever at a time.
+
+Whenever a ratio against `c=1` appears, it is labelled as such.
 
 ## External Benchmark Context
 
@@ -27,13 +42,15 @@ This project uses those benchmarks as context rather than as a direct ranking ta
 | [TensorRT-LLM performance overview](https://nvidia.github.io/TensorRT-LLM/performance/perf-overview.html) | Published maximum-load output throughput for Llama 3.1 405B on H100/H200 | Newer GPUs, FP8, TensorRT-LLM, and different input/output lengths |
 | [NVIDIA Tesla V100](https://www.nvidia.com/en-gb/data-center/tesla-v100/) | V100 tensor-core peak performance used for the efficiency estimate | Peak FLOP/s is only an upper bound, not an inference throughput prediction |
 
-One useful public scale point is TensorRT-LLM's `2048/128` Llama 3.1 405B FP8 row. Its benchmark reports maximum-load `Total Output Throughput (tokens/sec)`. The numbers below should be read as context for workload scale, not as a claim that the V100 result is faster than modern GPUs.
+One useful public scale point is TensorRT-LLM's `2048/128` Llama 3.1 405B FP8 row. Its benchmark reports maximum-load `Total Output Throughput (tokens/sec)`. The numbers below are context for workload scale, not a ranking.
 
-| Source | Hardware | Runtime / precision | Input / output | Output tok/s | Note |
-| --- | --- | --- | ---: | ---: | --- |
-| TensorRT-LLM public table | 8 x H100 SXM 80GB | TensorRT-LLM / FP8 | 2048 / 128 | 433.47 | Longer prefill and newer GPUs |
-| TensorRT-LLM public table | 8 x H200 SXM 141GB | TensorRT-LLM / FP8 | 2048 / 128 | 441.35 | Longer prefill and newer GPUs |
-| This project | 16 x V100-SXM2-32GB | vLLM / GPTQ INT4 | 512 / 128 | 650.33 | Shorter prefill, more GPUs, older hardware |
+| Source | Hardware | Runtime / precision | Input / output | Output tok/s | Per GPU |
+| --- | --- | --- | ---: | ---: | ---: |
+| TensorRT-LLM public table | 8 x H100 SXM 80GB | TensorRT-LLM / FP8 | 2048 / 128 | 433.47 | 54.18 |
+| TensorRT-LLM public table | 8 x H200 SXM 141GB | TensorRT-LLM / FP8 | 2048 / 128 | 441.35 | 55.17 |
+| This project | 16 x V100-SXM2-32GB | vLLM / GPTQ INT4 | 512 / 128 | 650.33 | 40.65 |
+
+The aggregate column favours this project for two reasons that have nothing to do with the optimization work: it uses twice as many GPUs, and its prefill is a quarter the length. Normalizing per GPU already flips the ordering, and the H100/H200 rows still carry the longer prefill. The honest reading is that a Volta-era allocation lands in the same order of magnitude on this workload, not that it beats an H100.
 
 ## Testbed
 
@@ -56,18 +73,20 @@ One useful public scale point is TensorRT-LLM's `2048/128` Llama 3.1 405B FP8 ro
 
 The main comparison is controlled at `c=128` after the single-request baseline. This keeps request pressure fixed while changing one systems lever at a time. The final `c=768` row is included as a higher-concurrency throughput run.
 
-| Step | Configuration | Parallelism | Concurrency | Aggregate tok/s | vs baseline |
-| --- | --- | --- | ---: | ---: | ---: |
-| Single-request baseline | stock vLLM / XFormers | `TP=8`, `PP=2` | 1 | 7.27 | 1.00x |
-| Continuous batching | stock vLLM / XFormers | `TP=8`, `PP=2` | 128 | 120.65 | 16.60x |
-| V100 FlashAttention | `FLASH_ATTN_V100` | `TP=8`, `PP=2` | 128 | 209.50 | 28.82x |
-| Cross-node TP without IB transport | `FLASH_ATTN_V100` + Socket | `TP=16`, `PP=1` | 128 | 156.12 | 21.47x |
-| Cross-node TP with IB/GDRDMA | `FLASH_ATTN_V100` + NCCL `NET/IB` | `TP=16`, `PP=1` | 128 | 351.62 | 48.37x |
-| Higher-concurrency run | `FLASH_ATTN_V100` + NCCL `NET/IB` | `TP=16`, `PP=1` | 768 | 650.33 | 89.45x |
+| Step | Configuration | Parallelism | Concurrency | Aggregate tok/s | vs stock @ `c=128` | vs `c=1` |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| Single-request baseline | stock vLLM / XFormers | `TP=8`, `PP=2` | 1 | 7.27 | — | 1.00x |
+| Continuous batching | stock vLLM / XFormers | `TP=8`, `PP=2` | 128 | 120.65 | 1.00x | 16.60x |
+| V100 FlashAttention | `FLASH_ATTN_V100` | `TP=8`, `PP=2` | 128 | 209.50 | 1.74x | 28.82x |
+| Cross-node TP without IB transport | `FLASH_ATTN_V100` + Socket | `TP=16`, `PP=1` | 128 | 156.12 | 1.29x | 21.47x |
+| Cross-node TP with IB/GDRDMA | `FLASH_ATTN_V100` + NCCL `NET/IB` | `TP=16`, `PP=1` | 128 | **351.62** | **2.91x** | 48.37x |
+| Higher-concurrency run | `FLASH_ATTN_V100` + NCCL `NET/IB` | `TP=16`, `PP=1` | 768 | 650.33 | not controlled | 89.45x |
+
+The **`vs stock @ c=128`** column is the result of this project: same request pressure, same allocation, roughly one lever changed per row (the `TP=16` rows also switch to eager execution — see [Limitations](#limitations)). The **`vs c=1`** column is included only for continuity with the baseline row and mostly measures concurrency, not engineering — see [How to read the speedup numbers](#how-to-read-the-speedup-numbers). The last row changes concurrency as well as configuration, so it has no controlled ratio.
 
 ![Optimization path from baseline to high-concurrency throughput](figures/optimization_path.svg)
 
-The important point is that `TP=16`, `PP=1` is only good after NCCL uses InfiniBand transport. With Socket transport, cross-node tensor parallelism is slower than the simpler `TP=8`, `PP=2` layout. With `NET/IB` and GDRDMA, it becomes the best layout.
+The important point is that `TP=16`, `PP=1` is only good after NCCL uses InfiniBand transport. With Socket transport, cross-node tensor parallelism is *slower* than the simpler `TP=8`, `PP=2` layout (`156.12` vs `209.50 tok/s`). With `NET/IB` and GDRDMA, the identical parallelism config runs `2.25x` faster and becomes the best layout. Transport, not topology, is the deciding variable.
 
 ## Continuous Batching And Attention
 
@@ -156,15 +175,34 @@ Estimated MFU = useful model TFLOP/s / (16 x 125 TFLOP/s)
 
 The highest run reaches `650.33 tok/s`, which corresponds to about `526.8 TFLOP/s` of useful dense-model work. Against a simple `16 x 125 TFLOP/s = 2.0 PFLOP/s` V100 tensor-core roof, this is about `26.3%` estimated MFU. The gap between `94.5%` GPU utilization and `26.3%` MFU is the main systems interpretation: the GPUs are busy, but not all busy time is ideal dense matrix compute.
 
+Caveats on the estimate: the `2 x parameters` rule counts only weight GEMMs, so prefill attention, KV reads, and INT4 dequantization work are excluded from the numerator; the `125 TFLOP/s` roof is the FP16 tensor-core peak, which is the right roof here because GPTQ INT4 weights are dequantized to FP16 before the GEMM. The number is meant to answer "same ballpark or an order of magnitude off?", not to be compared against a published MFU.
+
 ## Interpretation
 
-Continuous batching is the first-order serving optimization. Stock vLLM improves from `7.27` to `120.65 tok/s` when concurrency increases from `1` to `128`.
+Continuous batching is the first-order serving optimization, but it is a workload change rather than a code change: stock vLLM goes from `7.27` to `120.65 tok/s` as concurrency rises from `1` to `128`, at the cost of per-request throughput. It is a precondition for the rest of the study, because none of the later levers do anything at `c=1`.
 
-The V100 FlashAttention backend matters after batching exposes enough work. At `c=128`, it raises throughput from `120.65` to `209.50 tok/s`.
+The V100 FlashAttention backend matters once batching exposes enough work. At `c=128` it raises throughput from `120.65` to `209.50 tok/s` (`1.74x`), and the gap widens with concurrency: at `c=512`, stock XFormers has flattened at `123.92 tok/s` while `FLASH_ATTN_V100` reaches `380.04`.
 
-The HPC-specific result is the topology and transport interaction. Cross-node tensor parallelism is not automatically better. It becomes better only after the container exposes the RDMA userspace libraries needed for NCCL `NET/IB` and GDRDMA.
+The HPC-specific result is the topology and transport interaction. Cross-node tensor parallelism is not automatically better — with Socket transport it *loses* to `TP=8`, `PP=2`. It becomes better only after the container exposes the RDMA userspace libraries needed for NCCL `NET/IB` and GDRDMA, which is a container-packaging problem rather than a model-serving one.
 
-The final result targets offline or batched serving throughput. The clean controlled result is `351.62 tok/s` at `c=128`; the highest measured result is `650.33 tok/s` at `c=768`.
+The final result targets offline or batched serving throughput. The clean controlled result is `351.62 tok/s` at `c=128`, `2.91x` over stock vLLM at the same concurrency; the highest measured result is `650.33 tok/s` at `c=768`, where mean latency has grown to `150.69s` and the configuration is no longer a controlled comparison.
+
+## Limitations
+
+- Each concurrency point is one benchmark of `concurrency x RUNS_PER_CONCURRENCY_FACTOR` requests, not a repeated trial. No variance or confidence interval is reported, so small differences between adjacent rows should not be read as significant.
+- Execution mode is not held constant across the main table. The `TP=8`, `PP=2` rows use CUDA graphs; the `TP=16`, `PP=1` rows and every run at `c>=256` use eager execution, because a 32GB V100 does not leave enough headroom for graph capture at that memory pressure. The `209.50 -> 351.62 tok/s` step therefore changes execution mode alongside parallelism and transport, so it is a configuration comparison rather than a single isolated lever.
+- One model, one prompt shape (`512/128`), one quantization. No claim is made about other model sizes, longer contexts, or FP16 weights.
+- MFU is a roofline estimate, not a measured hardware FLOP count.
+- Raw `runs/` output is not committed to this repository; the tables here are the summarized form.
+- This is a constrained course experiment on a shared cluster, not an MLPerf submission, and the external benchmark rows are context only.
+
+## Repository Layout
+
+```text
+slurm/     Slurm batch scripts, one per model and allocation
+scripts/   environment setup, benchmark client, and summarizers
+figures/   SVG figures referenced by this README
+```
 
 ## Additional Experiments
 
@@ -187,6 +225,8 @@ Do not install packages or run inference on the login node. Create the vLLM envi
 cd /work/$USER/llm
 sbatch slurm/setup_vllm_env.slurm
 ```
+
+`CONCURRENCY_LEVELS` is a comma-separated sweep, and `RUNS_PER_CONCURRENCY_FACTOR` sets the total request count as `concurrency x factor` — so `c=128` with factor `2` issues `256` requests through `128` in-flight slots.
 
 Run the V100 FlashAttention `c=128` baseline:
 
